@@ -16,6 +16,7 @@ body { background: #f8fafc; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+input.text-white, select.text-white, textarea.text-white { color: #0f172a !important; }
 
 /* Compatibilidad visual para las pantallas existentes mientras comparten el tema claro. */
 .bg-zinc-950 { background-color: #f8fafc !important; }
