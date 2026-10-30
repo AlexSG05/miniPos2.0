@@ -14,7 +14,7 @@ import { useAuth } from "../features/auth/useAuth";
 function RoleRoutes() {
   const { user } = useAuth();
   if (!user) return null;
-  const home = user.role === "cashier" ? "/ventas" : "/ventas";
+  const home = user.role === "cashier" || "inventory" || "admin" ? "/ventas" : "/ventas";
   return <AppShell>
     <Routes>
       <Route path="/" element={user.role === "admin" ? <DashboardPage /> : <Navigate to={home} replace />} />
