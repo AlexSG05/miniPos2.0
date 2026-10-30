@@ -2,6 +2,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import ProductsPage from "../features/products/ProductsPage";
+import DashboardPage from "../features/dashboard/DashboardPage";
 import SalesPage from "../features/sales/SalesPage";
 import CashRegisterPage from "../features/cash-register/CashRegisterPage";
 import ReportsPage from "../features/reports/ReportsPage";
@@ -16,7 +17,7 @@ function RoleRoutes() {
   const home = user.role === "cashier" ? "/ventas" : "/ventas";
   return <AppShell>
     <Routes>
-      <Route path="/" element={<Navigate to={home} replace />} />
+      <Route path="/" element={user.role === "admin" ? <DashboardPage /> : <Navigate to={home} replace />} />
       {(user.role === "admin" || user.role === "cashier") && <Route path="/ventas" element={<SalesPage />} />}
       {(user.role === "admin" || user.role === "inventory") && <Route path="/productos" element={<ProductsPage />} />}
       {(user.role === "admin" || user.role === "cashier") && <Route path="/caja" element={<CashRegisterPage />} />}
