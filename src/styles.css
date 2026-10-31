@@ -3,128 +3,81 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, -apple-system, sans-serif;
-  color: #0f172a;
-  background-color: #f8fafc;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1e293b;
+  background: #f8fafc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
-
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+body { background: #f8fafc; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+input.text-white, select.text-white, textarea.text-white { color: #0f172a !important; }
 
-/* Contenedor Principal del POS */
-.pos-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background-color: #f1f5f9;
+/* Compatibilidad visual para las pantallas existentes mientras comparten el tema claro. */
+.bg-zinc-950 { background-color: #f8fafc !important; }
+.bg-zinc-900, .bg-zinc-900\/40, .bg-zinc-900\/30, .bg-zinc-900\/50 { background-color: #ffffff !important; }
+.bg-zinc-900\/40:hover, .bg-zinc-900:hover { background-color: #f8fafc !important; }
+.border-zinc-800, .border-zinc-700, .border-zinc-600 { border-color: #e2e8f0 !important; }
+.divide-zinc-800 > :not([hidden]) ~ :not([hidden]) { border-color: #e2e8f0 !important; }
+.text-zinc-100, .text-zinc-200 { color: #1e293b !important; }
+.text-zinc-300 { color: #334155 !important; }
+.text-zinc-400, .text-zinc-500 { color: #64748b !important; }
+.text-sky-300, .text-sky-400 { color: #2563eb !important; }
+.bg-sky-700, .bg-sky-600, .bg-yellow-500, .bg-emerald-600 { background-color: #2563eb !important; color: #ffffff !important; }
+.bg-sky-700:hover, .bg-sky-600:hover, .bg-yellow-500:hover, .bg-emerald-600:hover { background-color: #1d4ed8 !important; }
+.border-red-900 { border-color: #fecaca !important; }
+.bg-red-950\/40 { background-color: #fef2f2 !important; }
+.text-red-300 { color: #b91c1c !important; }
+.border-emerald-900 { border-color: #a7f3d0 !important; }
+.bg-emerald-950\/30 { background-color: #ecfdf5 !important; }
+.text-emerald-300 { color: #047857 !important; }
+.border-amber-900\/60 { border-color: #fde68a !important; }
+.bg-amber-950\/20 { background-color: #fffbeb !important; }
+.text-amber-200, .text-amber-300 { color: #b45309 !important; }
+.bg-zinc-950 input, .bg-zinc-950 select, .bg-zinc-950 textarea,
+input.bg-zinc-950, select.bg-zinc-950, textarea.bg-zinc-950 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
 }
+table thead { background-color: #f1f5f9 !important; }
+table tbody tr:hover { background-color: #f8fafc; }
 
-/* Layout Principal de 2 Columnas */
-.pos-layout {
-  display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 1rem;
-  flex: 1;
-  padding: 1rem;
-  min-height: 0;
+/* Acceso inicial y autenticación */
+.auth-screen {
+  display: flex; min-height: 100vh; align-items: center; justify-content: center;
+  padding: 24px; background: radial-gradient(circle at top left, #dbeafe 0, transparent 38%), #f8fafc;
 }
-
-@media (max-width: 1024px) {
-  .pos-layout {
-    grid-template-columns: 1fr 300px;
-  }
+.auth-panel {
+  width: 100%; max-width: 440px; padding: 36px; border: 1px solid #e2e8f0;
+  border-radius: 22px; background: #fff; box-shadow: 0 20px 60px -24px rgb(15 23 42 / .22);
 }
-
-/* Estilos de Tabla de Productos */
-.pos-table-wrapper {
-  background: #ffffff;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+.auth-mark {
+  display: flex; width: 52px; height: 52px; align-items: center; justify-content: center;
+  border-radius: 16px; background: #eff6ff; color: #2563eb;
 }
-
-.pos-table {
-  width: 100%;
-  text-align: left;
-  border-collapse: collapse;
+.auth-panel .eyebrow { margin-top: 22px; color: #2563eb; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+.auth-panel h1 { margin-top: 8px; color: #0f172a; font-size: 27px; font-weight: 750; letter-spacing: -.03em; }
+.auth-description { margin-top: 8px; margin-bottom: 24px; color: #64748b; font-size: 14px; line-height: 1.6; }
+.auth-panel label { display: block; margin-top: 16px; color: #334155; font-size: 13px; font-weight: 650; }
+.auth-panel input {
+  display: block; width: 100%; margin-top: 7px; padding: 12px 13px; border: 1px solid #cbd5e1;
+  border-radius: 10px; background: #fff; color: #0f172a; outline: none;
 }
-
-.pos-table th {
-  background-color: #f8fafc;
-  color: #475569;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e2e8f0;
+.auth-panel input:focus { border-color: #3b82f6; box-shadow: 0 0 0 4px #dbeafe; }
+.auth-hint { margin-top: 8px; color: #64748b; font-size: 12px; line-height: 1.5; }
+.auth-error { margin-top: 16px; padding: 11px 12px; border: 1px solid #fecaca; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 13px; }
+.auth-panel > button {
+  display: flex; width: 100%; align-items: center; justify-content: center; gap: 9px;
+  margin-top: 22px; padding: 13px; border: 0; border-radius: 11px; background: #2563eb;
+  color: #fff; font-size: 14px; font-weight: 700; transition: background .15s ease;
 }
-
-.pos-table td {
-  padding: 0.75rem 1rem;
-  font-size: 0.875rem;
-  color: #1e293b;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.pos-table tr:hover {
-  background-color: #f8fafc;
-}
-
-/* Bloque de Escaneo de Código e Inputs */
-.pos-input-bar {
-  background: #ffffff;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
-  padding: 0.75rem 1rem;
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
-}
-
-/* Panel Lateral Derecho (Resumen y Cobro) */
-.pos-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-height: 0;
-}
-
-/* Tarjeta del Total General */
-.pos-total-card {
-  background-color: #0f172a;
-  color: #ffffff;
-  border-radius: 0.75rem;
-  padding: 1.25rem;
-  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.pos-total-amount {
-  font-size: 3rem;
-  font-weight: 800;
-  line-height: 1;
-  color: #34d399; /* Emerald 400 */
-  font-family: monospace, monospace;
-}
-
-/* Badges de Atajos de Teclado */
-kbd {
-  background-color: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.25rem;
-  box-shadow: 0 1px 0 0 #cbd5e1;
-  color: #334155;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 0.15rem 0.4rem;
-}
+.auth-panel > button:hover { background: #1d4ed8; }
+.auth-panel > button:disabled { opacity: .6; cursor: wait; }
+.auth-loading { display: grid; min-height: 100vh; place-items: center; background: #f8fafc; color: #475569; font-size: 14px; }
+@media (max-width: 640px) { .auth-panel { padding: 26px 22px; } }

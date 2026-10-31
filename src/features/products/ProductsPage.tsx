@@ -211,15 +211,15 @@ export default function ProductsPage() {
   }
 
   const inputClass =
-    "w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-yellow-500";
+    "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500";
 
   return (
-    <main className="min-h-full space-y-6 bg-zinc-950 p-6 text-zinc-100">
+    <main className="min-h-full space-y-6 bg-slate-50 p-6 text-slate-800">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-sm text-zinc-400">Inventario / Catálogo</p>
+          <p className="text-sm text-slate-500">Inventario / Catálogo</p>
           <h1 className="mt-1 text-2xl font-semibold">Productos</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-slate-500">
             Administra precios, códigos y existencias.
           </p>
         </div>
@@ -238,7 +238,7 @@ export default function ProductsPage() {
               setShowForm(true);
             }
           }}
-          className="rounded-lg bg-yellow-500 px-4 py-2.5 text-sm font-semibold text-black hover:bg-yellow-400"
+          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-black hover:bg-yellow-400"
         >
           {showForm ? "Cancelar" : "+ Nuevo producto"}
         </button>
@@ -259,7 +259,7 @@ export default function ProductsPage() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="grid grid-cols-1 gap-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 md:grid-cols-2 lg:grid-cols-3"
+          className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white p-5 md:grid-cols-2 lg:grid-cols-3"
         >
           <label className="space-y-1.5 text-sm">
             Código interno *
@@ -374,7 +374,7 @@ export default function ProductsPage() {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-lg bg-yellow-500 px-5 py-2.5 text-sm font-semibold text-black disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-black disabled:opacity-50"
             >
               {saving ? "Guardando..." : editingId === null ? "Guardar producto" : "Guardar cambios"}
             </button>
@@ -382,18 +382,18 @@ export default function ProductsPage() {
         </form>
       )}
 
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Categorías</h2>
         <form onSubmit={handleCreateCategory} className="mt-3 flex max-w-xl gap-2">
           <input className={inputClass} value={newCategoryName} maxLength={80} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Nombre de categoría" required />
-          <button disabled={categorySaving} className="whitespace-nowrap rounded bg-sky-700 px-4 text-sm font-semibold disabled:opacity-50">{categorySaving ? "Guardando..." : "Crear categoría"}</button>
+          <button disabled={categorySaving} className="whitespace-nowrap rounded bg-blue-600 px-4 text-sm font-semibold disabled:opacity-50">{categorySaving ? "Guardando..." : "Crear categoría"}</button>
         </form>
-        {categories.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{categories.map((category) => <span key={category.id} className="flex items-center gap-2 rounded border border-zinc-700 px-3 py-1.5 text-sm"><span>{category.name}{category.active ? "" : " · Archivada"}</span>{category.active && <button type="button" onClick={() => void handleCategoryActive(category)} className="text-xs text-amber-300">Archivar</button>}</span>)}</div>}
+        {categories.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{categories.map((category) => <span key={category.id} className="flex items-center gap-2 rounded border border-slate-200 px-3 py-1.5 text-sm"><span>{category.name}{category.active ? "" : " · Archivada"}</span>{category.active && <button type="button" onClick={() => void handleCategoryActive(category)} className="text-xs text-amber-300">Archivar</button>}</span>)}</div>}
       </section>
 
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Movimiento de inventario</h2>
-        <p className="mt-1 text-sm text-zinc-400">Cada entrada o salida queda registrada junto con su motivo.</p>
+        <p className="mt-1 text-sm text-slate-500">Cada entrada o salida queda registrada junto con su motivo.</p>
         <form onSubmit={handleAdjustment} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
           <select aria-label="Producto para ajuste" className={inputClass} value={adjustment.productId} onChange={(e) => setAdjustment({ ...adjustment, productId: e.target.value })} required>
             <option value="">Selecciona producto</option>
@@ -404,22 +404,22 @@ export default function ProductsPage() {
           </select>
           <input aria-label="Cantidad del movimiento" className={inputClass} type="number" min={selectedAdjustmentProduct?.unit === "piece" ? "1" : "0.001"} step={selectedAdjustmentProduct?.unit === "piece" ? "1" : "0.001"} placeholder="Cantidad" value={adjustment.quantity} onChange={(e) => setAdjustment({ ...adjustment, quantity: e.target.value })} required />
           <input aria-label="Motivo del movimiento" className={inputClass} maxLength={240} placeholder="Motivo" value={adjustment.reason} onChange={(e) => setAdjustment({ ...adjustment, reason: e.target.value })} required />
-          <button disabled={savingAdjustment} className="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50" type="submit">{savingAdjustment ? "Guardando..." : "Registrar movimiento"}</button>
+          <button disabled={savingAdjustment} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50" type="submit">{savingAdjustment ? "Guardando..." : "Registrar movimiento"}</button>
         </form>
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/30">
-        <h2 className="border-b border-zinc-800 p-4 font-semibold">Movimientos recientes</h2>
-        {movements.length === 0 ? <p className="p-5 text-sm text-zinc-400">Aún no hay movimientos de inventario.</p> : (
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <h2 className="border-b border-slate-200 p-4 font-semibold">Movimientos recientes</h2>
+        {movements.length === 0 ? <p className="p-5 text-sm text-slate-500">Aún no hay movimientos de inventario.</p> : (
           <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-            <thead className="bg-zinc-900 text-xs uppercase text-zinc-400"><tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Producto</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Cambio</th><th className="px-4 py-3">Existencia final</th><th className="px-4 py-3">Motivo</th></tr></thead>
-            <tbody className="divide-y divide-zinc-800">{movements.map((movement) => <tr key={movement.id}><td className="px-4 py-3">{new Date(movement.createdAt).toLocaleString("es-MX")}</td><td className="px-4 py-3">{movement.productName}</td><td className="px-4 py-3">{{ initial_stock: "Existencia inicial", purchase: "Entrada", manual_out: "Salida", adjustment: "Ajuste", sale: "Venta", return: "Devolución" }[movement.movementType] ?? movement.movementType}</td><td className="px-4 py-3">{movement.movementType === "manual_out" ? "−" : "+"}{movement.quantity}</td><td className="px-4 py-3">{movement.newQuantity}</td><td className="px-4 py-3">{movement.reason}</td></tr>)}</tbody>
+            <thead className="bg-white text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Producto</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Cambio</th><th className="px-4 py-3">Existencia final</th><th className="px-4 py-3">Motivo</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">{movements.map((movement) => <tr key={movement.id}><td className="px-4 py-3">{new Date(movement.createdAt).toLocaleString("es-MX")}</td><td className="px-4 py-3">{movement.productName}</td><td className="px-4 py-3">{{ initial_stock: "Existencia inicial", purchase: "Entrada", manual_out: "Salida", adjustment: "Ajuste", sale: "Venta", return: "Devolución" }[movement.movementType] ?? movement.movementType}</td><td className="px-4 py-3">{movement.movementType === "manual_out" ? "−" : "+"}{movement.quantity}</td><td className="px-4 py-3">{movement.newQuantity}</td><td className="px-4 py-3">{movement.reason}</td></tr>)}</tbody>
           </table></div>
         )}
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/30">
-        <div className="border-b border-zinc-800 p-4">
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 p-4">
           <input
             className={inputClass}
             placeholder="Buscar por nombre, código o código de barras..."
@@ -428,26 +428,26 @@ export default function ProductsPage() {
           />
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <select aria-label="Filtrar por categoría" className={inputClass + " max-w-xs"} value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">Todas las categorías</option>{categories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
-            <label className="flex items-center gap-2 text-sm text-zinc-400"><input type="checkbox" checked={includeInactive} onChange={(event) => setIncludeInactive(event.target.checked)} />Mostrar archivados</label>
+            <label className="flex items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={includeInactive} onChange={(event) => setIncludeInactive(event.target.checked)} />Mostrar archivados</label>
           </div>
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 text-xs text-slate-500">
             {products.length} productos encontrados
           </p>
         </div>
 
         {loading ? (
-          <p className="p-8 text-center text-sm text-zinc-400">Cargando productos...</p>
+          <p className="p-8 text-center text-sm text-slate-500">Cargando productos...</p>
         ) : products.length === 0 ? (
           <div className="p-10 text-center">
             <p className="font-medium">No hay productos para mostrar</p>
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-1 text-sm text-slate-500">
               Registra un producto para comenzar tu catálogo.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-zinc-900 text-xs uppercase text-zinc-400">
+              <thead className="bg-white text-xs uppercase text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Producto</th>
                   <th className="px-4 py-3">Código</th>
@@ -457,30 +457,30 @@ export default function ProductsPage() {
                   <th className="px-4 py-3">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800">
+              <tbody className="divide-y divide-slate-100">
                 {products.map((product) => (
-                  <tr key={product.id} className="hover:bg-zinc-900">
+                  <tr key={product.id} className="hover:bg-white">
                     <td className="px-4 py-3">
                       <p className="font-medium">{product.name}</p>
                       {product.description && (
-                        <p className="mt-1 text-xs text-zinc-500">{product.description}</p>
+                        <p className="mt-1 text-xs text-slate-500">{product.description}</p>
                       )}
-                      <p className="mt-1 text-xs text-zinc-500">{product.categoryName ?? "Sin categoría"}{product.active ? "" : " · Archivado"}</p>
+                      <p className="mt-1 text-xs text-slate-500">{product.categoryName ?? "Sin categoría"}{product.active ? "" : " · Archivado"}</p>
                     </td>
-                    <td className="px-4 py-3 text-zinc-400">
+                    <td className="px-4 py-3 text-slate-500">
                       {product.internalCode}
                     </td>
                     <td className="px-4 py-3">{money(product.costCents)}</td>
                     <td className="px-4 py-3 font-medium">{money(product.priceCents)}</td>
                     <td className="px-4 py-3">
-                      <span className={product.stockQuantity <= product.minStock ? "text-amber-400" : "text-zinc-200"}>
+                      <span className={product.stockQuantity <= product.minStock ? "text-amber-400" : "text-slate-800"}>
                         {product.stockQuantity} {product.unit}
                       </span>
                       {product.stockQuantity <= product.minStock && (
                         <p className="mt-1 text-xs text-amber-400">Stock bajo</p>
                       )}
                     </td>
-                    <td className="px-4 py-3"><div className="flex gap-2"><button type="button" onClick={() => startEditing(product)} disabled={!product.active} className="rounded border border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-800 disabled:opacity-40">Editar</button><button type="button" onClick={() => void handleProductActive(product)} className="rounded border border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-800">{product.active ? "Archivar" : "Reactivar"}</button></div></td>
+                    <td className="px-4 py-3"><div className="flex gap-2"><button type="button" onClick={() => startEditing(product)} disabled={!product.active} className="rounded border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-zinc-800 disabled:opacity-40">Editar</button><button type="button" onClick={() => void handleProductActive(product)} className="rounded border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-zinc-800">{product.active ? "Archivar" : "Reactivar"}</button></div></td>
                   </tr>
                 ))}
               </tbody>

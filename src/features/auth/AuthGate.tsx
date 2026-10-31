@@ -28,8 +28,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     <p className="auth-description">{needsSetup ? "Configura la cuenta administradora para proteger este punto de venta." : "Ingresa con tu cuenta de este equipo."}</p>
     <label>Usuario<input autoFocus minLength={3} maxLength={40} autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
     {needsSetup && <label>Nombre visible<input maxLength={120} value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label>}
-    <label>Contraseña<input type="password" minLength={3} maxLength={128} autoComplete={needsSetup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-    {needsSetup && <p className="auth-hint">Usa al menos 10 caracteres. Esta contraseña protege el acceso local.</p>}
+    <label>Contraseña<input type="password" minLength={10} maxLength={128} autoComplete={needsSetup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+    {needsSetup && <p className="auth-hint">La contraseña debe tener entre 10 y 128 caracteres para crear la cuenta administradora.</p>}
     {error && <div role="alert" className="auth-error">{error}</div>}
     <button disabled={saving} type="submit"><LogIn size={16} />{saving ? "Validando…" : needsSetup ? "Crear cuenta" : "Entrar"}</button>
   </form></main>;

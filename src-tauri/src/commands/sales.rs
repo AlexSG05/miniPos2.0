@@ -11,6 +11,8 @@ use crate::infrastructure::database::Database;
 pub struct SaleRequest {
     pub operation_id: String,
     pub items: Vec<SaleRequestItem>,
+    #[serde(default)]
+    pub discount_cents: i64,
     pub payment_method: String,
     pub received_cents: i64,
 }
@@ -46,6 +48,7 @@ pub struct RefundReceipt {
 pub struct SaleReceipt {
     pub folio: String,
     pub subtotal_cents: i64,
+    pub discount_cents: i64,
     pub tax_cents: i64,
     pub total_cents: i64,
     pub payment_method: String,
@@ -139,7 +142,7 @@ pub async fn get_sale_receipt(db: State<'_, Database>, auth: State<'_, AuthState
         return Err("El folio indicado no es válido.".into());
     }
     let receipt = sqlx::query_as::<_, SaleReceipt>(
-        "SELECT s.folio, s.subtotal_cents, s.tax_cents, s.total_cents,
+        "SELECT s.folio, s.subtotal_cents, s.discount_cents, s.tax_cents, s.total_cents,
                 COALESCE((SELECT group_concat(method, ', ') FROM
                     (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') AS payment_method,
                 COALESCE((SELECT SUM(received_cents) FROM sale_payments WHERE sale_id = s.id), 0) AS received_cents,
@@ -205,7 +208,7 @@ pub async fn get_sales_report(db: State<'_, Database>, auth: State<'_, AuthState
 
 async fn receipt_by_operation(db: &sqlx::SqlitePool, operation_id: &str) -> Result<Option<SaleReceipt>, String> {
     sqlx::query_as::<_, SaleReceipt>(
-        "SELECT s.folio, s.subtotal_cents, s.tax_cents, s.total_cents, p.method AS payment_method,
+        "SELECT s.folio, s.subtotal_cents, s.discount_cents, s.tax_cents, s.total_cents, p.method AS payment_method,
                 p.received_cents, p.change_cents, s.created_at
          FROM sales s JOIN sale_payments p ON p.sale_id = s.id
          WHERE s.operation_id = ? AND s.status = 'completed' LIMIT 1"
@@ -258,7 +261,11 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
     }
     let tax_rate: i64 = sqlx::query_scalar("SELECT tax_rate_basis_points FROM business_settings WHERE id = 1")
         .fetch_one(&mut *tx).await.map_err(|_| "No fue posible leer la tasa fiscal configurada.".to_string())?;
-    let tax_calc = (subtotal as i128).checked_mul(tax_rate as i128)
+    if request.discount_cents < 0 || request.discount_cents > subtotal {
+        return Err("El descuento debe estar entre cero y el subtotal de la venta.".into());
+    }
+    let taxable = subtotal - request.discount_cents;
+    let tax_calc = (taxable as i128).checked_mul(tax_rate as i128)
         .ok_or_else(|| "El impuesto excede el límite permitido.".to_string())?;
     let tax = i64::try_from((tax_calc + 5000) / 10000)
         .map_err(|_| "El impuesto excede el límite permitido.".to_string())?;
@@ -273,8 +280,8 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
 
     let inserted = sqlx::query(
         "INSERT INTO sales (operation_id, folio, session_id, subtotal_cents, discount_cents, tax_cents, total_cents, status)
-         VALUES (?, 'pending', ?, ?, 0, ?, ?, 'completed')"
-    ).bind(operation_id).bind(session_id).bind(subtotal).bind(tax).bind(total)
+         VALUES (?, 'pending', ?, ?, ?, ?, ?, 'completed')"
+    ).bind(operation_id).bind(session_id).bind(subtotal).bind(request.discount_cents).bind(tax).bind(total)
         .execute(&mut *tx).await.map_err(|error| {
             eprintln!("Error guardando venta: {error}");
             "No fue posible registrar la venta.".to_string()

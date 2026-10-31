@@ -5,6 +5,7 @@ export type SaleItemRequest = { productId: number; quantityMilli: number };
 export type SaleReceipt = {
   folio: string;
   subtotalCents: number;
+  discountCents: number;
   taxCents: number;
   totalCents: number;
   paymentMethod: "cash" | "card";
@@ -42,6 +43,7 @@ export function searchSaleProducts(search: string) {
 export function completeSale(request: {
   operationId: string;
   items: SaleItemRequest[];
+  discountCents: number;
   paymentMethod: "cash" | "card";
   receivedCents: number;
 }) {
