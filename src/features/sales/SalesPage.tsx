@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -36,11 +36,16 @@ export default function SalesPage() {
   const [paying, setPaying] = useState(false);
   const [method, setMethod] = useState<"cash" | "card">("cash");
   const [received, setReceived] = useState("");
+  const [discountPercent, setDiscountPercent] = useState("0");
+  const [showDiscount, setShowDiscount] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState<SaleReceipt | null>(null);
   const operationId = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const discountRef = useRef<HTMLInputElement>(null);
+  const checkoutFormRef = useRef<HTMLFormElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     void getOpenCashSession().then(setCash).catch((err) => setError(String(err)));
@@ -70,12 +75,52 @@ export default function SalesPage() {
     () => cart.reduce((sum, item) => sum + Math.round((item.product.priceCents * item.quantityMilli) / 1000), 0),
     [cart]
   );
+  const discountCents = Math.min(subtotalCents, Math.round(subtotalCents * Math.min(100, Math.max(0, Number(discountPercent) || 0)) / 100));
+  const taxableCents = subtotalCents - discountCents;
   const taxCents =
-    taxRateBasisPoints === null ? 0 : Math.floor((subtotalCents * taxRateBasisPoints + 5000) / 10000);
-  const totalCents = subtotalCents + taxCents;
+    taxRateBasisPoints === null ? 0 : Math.floor((taxableCents * taxRateBasisPoints + 5000) / 10000);
+  const totalCents = taxableCents + taxCents;
   const receivedCents = method === "card" ? totalCents : Math.round((Number(received) || 0) * 100);
   const changeCents = Math.max(0, receivedCents - totalCents);
   const itemCount = cart.reduce((sum, item) => sum + quantity(item.quantityMilli), 0);
+
+  useEffect(() => {
+    function onShortcut(event: KeyboardEvent) {
+      const key = /^F(?:1|3|4|12)$/.test(event.key) ? event.key : event.code;
+      if (!/^F(?:1|3|4|12)$/.test(key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (key === "F4") {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        setError("");
+      } else if (key === "F1") {
+        if (cart.length && window.confirm("¿Vaciar toda la venta actual?")) {
+          setCart([]);
+          setPaying(false);
+          setDiscountPercent("0");
+          setReceived("");
+          operationId.current = null;
+        }
+      } else if (key === "F3") {
+        setShowDiscount(true);
+        window.requestAnimationFrame(() => discountRef.current?.focus());
+      } else if (!cash) {
+        navigate("/caja");
+      } else if (cart.length) {
+        if (paying) checkoutFormRef.current?.requestSubmit();
+        else {
+          setPaying(true);
+          setMethod("cash");
+          setReceived("");
+        }
+      } else {
+        searchRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onShortcut, true);
+    return () => window.removeEventListener("keydown", onShortcut, true);
+  }, [cart.length, cash, navigate, paying]);
 
   function addProduct(product: Product) {
     setError("");
@@ -154,6 +199,10 @@ export default function SalesPage() {
       setError("Agrega al menos un producto para continuar.");
       return;
     }
+    if (method === "cash" && receivedCents < totalCents) {
+      setError("El efectivo recibido es menor que el total.");
+      return;
+    }
     setSaving(true);
     setError("");
     operationId.current ??= crypto.randomUUID();
@@ -164,12 +213,14 @@ export default function SalesPage() {
           productId: item.product.id,
           quantityMilli: item.quantityMilli,
         })),
+        discountCents,
         paymentMethod: method,
         receivedCents,
       });
       setReceipt(saved);
       setCart([]);
       setPaying(false);
+      setDiscountPercent("0");
       setReceived("");
       operationId.current = null;
       const [currentCash, currentProducts] = await Promise.all([
@@ -186,7 +237,7 @@ export default function SalesPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-150px)] max-w-[1680px] flex-col gap-5 text-slate-800">
+    <main className="mx-auto flex h-full min-h-0 max-w-[1680px] flex-col gap-4 overflow-hidden text-slate-800">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
@@ -214,7 +265,7 @@ export default function SalesPage() {
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             to="/caja"
           >
-            Abrir caja <ArrowRight size={16} />
+            Abrir caja <kbd>F12</kbd> <ArrowRight size={16} />
           </Link>
         )}
       </header>
@@ -246,8 +297,8 @@ export default function SalesPage() {
         </div>
       )}
 
-      <div className="grid min-h-[560px] flex-1 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_410px]">
-        <section className="flex min-h-[480px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-4 overflow-hidden xl:grid-cols-[minmax(0,1fr)_410px] xl:grid-rows-1">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
@@ -289,6 +340,7 @@ export default function SalesPage() {
             <p className="mt-2 text-xs text-slate-400">
               Consejo: puedes usar un lector de código de barras; el producto se buscará al presionar Enter.
             </p>
+            <p className="mt-1 text-xs text-slate-500">Atajos: F4 buscar · F3 descuento · F1 vaciar venta · F12 cobrar / abrir caja</p>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-5">
@@ -350,7 +402,7 @@ export default function SalesPage() {
           </div>
         </section>
 
-        <aside className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-190px)]">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
@@ -450,6 +502,15 @@ export default function SalesPage() {
               <div className="flex justify-between text-sm text-slate-500">
                 <span>Subtotal</span><span className="font-medium text-slate-700">{money(subtotalCents)}</span>
               </div>
+              {showDiscount ? (
+                <label className="flex items-center justify-between gap-3 text-sm text-slate-600">
+                  <span>Descuento (%)</span>
+                  <input ref={discountRef} type="number" min="0" max="100" step="1" value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} onBlur={() => setDiscountPercent(String(Math.min(100, Math.max(0, Number(discountPercent) || 0))))} className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right font-semibold text-slate-800 outline-none focus:border-blue-500" />
+                </label>
+              ) : (
+                <button type="button" onClick={() => { setShowDiscount(true); window.setTimeout(() => discountRef.current?.focus(), 0); }} className="flex w-full justify-between text-sm text-blue-700 hover:text-blue-800"><span>Agregar descuento</span><span>F3</span></button>
+              )}
+              {discountCents > 0 && <div className="flex justify-between text-sm font-medium text-emerald-700"><span>Descuento ({discountPercent}%)</span><span>-{money(discountCents)}</span></div>}
               <div className="flex justify-between text-sm text-slate-500">
                 <span>Impuestos</span><span className="font-medium text-slate-700">{money(taxCents)}</span>
               </div>
@@ -460,7 +521,7 @@ export default function SalesPage() {
             </div>
 
             {paying ? (
-              <form onSubmit={handleCheckout} className="space-y-3">
+              <form ref={checkoutFormRef} onSubmit={handleCheckout} className="space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Método de pago</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -530,7 +591,7 @@ export default function SalesPage() {
                 }}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                Continuar al cobro <ArrowRight size={17} />
+                Continuar al cobro <kbd>F12</kbd> <ArrowRight size={17} />
               </button>
             )}
             {!cash && (

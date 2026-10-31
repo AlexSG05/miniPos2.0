@@ -10,10 +10,11 @@ import {
 import { useAuth } from "../../features/auth/useAuth";
 
 const links = [
-  { to: "/", label: "Resumen", icon: LayoutDashboard, roles: ["admin"] },
+  
   { to: "/ventas", label: "Punto de venta", icon: ShoppingCart, roles: ["admin", "cashier"] },
+  { to: "/", label: "Resumen", icon: LayoutDashboard, roles: ["admin"] },
   { to: "/productos", label: "Productos", icon: Boxes, roles: ["admin", "inventory"] },
-  { to: "/caja", label: "Caja", icon: Archive, roles: ["admin", "cashier"] },
+  { to: "/caja", label: "Movimiento de caja", icon: Archive, roles: ["admin", "cashier",] },
   { to: "/reportes", label: "Reportes", icon: BarChart3, roles: ["admin"] },
   { to: "/usuarios", label: "Usuarios", icon: Users, roles: ["admin"] },
   { to: "/configuracion", label: "Configuración", icon: Settings, roles: ["admin"] },
@@ -24,6 +25,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const [cashIsOpen, setCashIsOpen] = useState(false);
   const [businessName, setBusinessName] = useState("MiniPOS");
+  const isSalesPage = location.pathname === "/ventas";
   const pageTitle = links.find((link) => link.to === location.pathname)?.label ?? "MiniPOS";
 
   useEffect(() => {
@@ -43,8 +45,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [location.pathname, user?.role]);
 
   return (
-    <div className="app-frame flex min-h-screen flex-col bg-slate-50 text-slate-800">
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
+    <div className={`app-frame flex flex-col bg-slate-50 text-slate-800 ${isSalesPage ? "h-dvh overflow-hidden" : "min-h-screen"}`}>
+      <header className="shrink-0 border-b border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="rounded-xl bg-blue-600 p-2 text-white shadow-sm"><Store size={19} /></div>
@@ -81,10 +83,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </header>
-      <main className="main-area min-h-0 flex-1 bg-slate-50">
-        <section className="page-content p-4 sm:p-5">{children}</section>
+      <main className={`main-area min-h-0 flex-1 bg-slate-50 ${isSalesPage ? "overflow-hidden" : ""}`}>
+        <section className={`page-content p-4 sm:p-5 ${isSalesPage ? "h-full min-h-0 overflow-hidden" : ""}`}>{children}</section>
       </main>
-      <footer className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
+      <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
         <span className="flex items-center gap-1"><Activity size={12} /> Modo local</span>
         <span>MiniPOS · V0.1.0</span>
       </footer>
