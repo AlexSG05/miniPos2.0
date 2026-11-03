@@ -3,22 +3,9 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { getOpenCashSession } from "../../features/cash-register/cash.api";
 import { getBusinessSettings } from "../../features/settings/settings.api";
-import {
-  Activity, Archive, BarChart3, Boxes, LayoutDashboard, LogOut,
-  Settings, ShoppingCart, Store, Users
-} from "lucide-react";
+import { Activity, LogOut, Store } from "lucide-react";
 import { useAuth } from "../../features/auth/useAuth";
-
-const links = [
-  
-  { to: "/ventas", label: "Punto de venta", icon: ShoppingCart, roles: ["admin", "cashier"] },
-  { to: "/", label: "Resumen", icon: LayoutDashboard, roles: ["admin"] },
-  { to: "/productos", label: "Productos", icon: Boxes, roles: ["admin", "inventory"] },
-  { to: "/caja", label: "Movimiento de caja", icon: Archive, roles: ["admin", "cashier",] },
-  { to: "/reportes", label: "Reportes", icon: BarChart3, roles: ["admin"] },
-  { to: "/usuarios", label: "Usuarios", icon: Users, roles: ["admin"] },
-  { to: "/configuracion", label: "Configuración", icon: Settings, roles: ["admin"] },
-];
+import { navLinks as links } from "./navLinks";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -29,6 +16,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pageTitle = links.find((link) => link.to === location.pathname)?.label ?? "MiniPOS";
 
   useEffect(() => {
+    if (isSalesPage) return; // el POS consulta el turno por su cuenta
     let active = true;
     const refresh = () => {
       if (user?.role === "inventory") { setCashIsOpen(false); return; }
@@ -42,10 +30,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
     refresh();
     const interval = window.setInterval(refresh, 15000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [location.pathname, user?.role]);
+  }, [isSalesPage, location.pathname, user?.role]);
+
+  // El punto de venta usa pantalla completa y trae su propio header compacto (con menú de navegación).
+  if (isSalesPage) {
+    return <div className="app-frame h-dvh overflow-hidden bg-slate-100">{children}</div>;
+  }
 
   return (
-    <div className={`app-frame flex flex-col bg-slate-50 text-slate-800 ${isSalesPage ? "h-dvh overflow-hidden" : "min-h-screen"}`}>
+    <div className="app-frame flex min-h-screen flex-col bg-slate-50 text-slate-800">
       <header className="shrink-0 border-b border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -83,8 +76,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </header>
-      <main className={`main-area min-h-0 flex-1 bg-slate-50 ${isSalesPage ? "overflow-hidden" : ""}`}>
-        <section className={`page-content p-4 sm:p-5 ${isSalesPage ? "h-full min-h-0 overflow-hidden" : ""}`}>{children}</section>
+      <main className="main-area min-h-0 flex-1 bg-slate-50">
+        <section className="page-content p-4 sm:p-5">{children}</section>
       </main>
       <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
         <span className="flex items-center gap-1"><Activity size={12} /> Modo local</span>
