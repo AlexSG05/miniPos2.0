@@ -1,3 +1,22 @@
+/**
+ * ============================================================================
+ * HOOKS: Utilerías de Tiempo y Conexión de Red
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Proporciona hooks personalizados para gestionar la hora actual en tiempo real 
+ * y monitorear el estado de la conexión a internet de la aplicación.
+ *
+ * HOOKS EXPORTADOS:
+ * 1. `useNow(intervalMs)`:
+ *    - Mantiene un objeto `Date` actualizado periódicamente mediante un intervalo.
+ *    - Realiza limpieza de temporizadores al desmontar el componente.
+ *
+ * 2. `useOnlineStatus()`:
+ *    - Retorna `true` o `false` según la conectividad del navegador (`navigator.onLine`).
+ *    - Implementa `useSyncExternalStore` (React 18+) para sincronización segura con SSR.
+ * ============================================================================
+ */
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 /** Fecha/hora actual, actualizada cada `intervalMs`. */

@@ -1,3 +1,21 @@
+/**
+ * ============================================================================
+ * UTILIDAD: Módulo de Menú Secundario para el POS (pos.menu.ts)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Construye dinámicamente las opciones del menú secundario o de navegación lateral 
+ * dentro del módulo POS, adaptando la interfaz según el rol del usuario activo.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Control de Acceso basado en Roles (RBAC): Filtra los enlaces globales (`navLinks`)
+ *    asegurando que solo se muestren las opciones permitidas para el `UserRole` dado.
+ * 2. Adaptación de Textos (COPY): Reemplaza los títulos globales de las rutas por 
+ *    nombres y descripciones (*hints*) enfocados en la operación diaria del POS.
+ * 3. Filtrado de Ruta Principal: Excluye explícitamente `/ventas` para evitar 
+ *    redundancia visual mientras el cajero opera la pantalla de cobro.
+ * ============================================================================
+ */
 import type { LucideIcon } from "lucide-react";
 import { navLinks } from "../../../components/layout/navLinks";
 import type { UserRole } from "../../auth/auth.api";

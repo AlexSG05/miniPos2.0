@@ -1,3 +1,22 @@
+/**
+ * ============================================================================
+ * COMPONENTE: PosHeader (Barra Superior de Estado y Navegación del POS)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Muestra el encabezado principal del sistema POS con la información contextual 
+ * de la sesión activa, estado de red, estado de caja y menú de navegación.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Indicadores de Estado: Muestra en tiempo real la sucursal, caja, cajero activo, 
+ *    estado de la conexión a internet y estado del turno (abierto/cerrado).
+ * 2. Menú Accesible con Teclado: Desplegable con soporte para navegación por 
+ *    flechas (`ArrowUp` / `ArrowDown`), cierre con `Escape` y trampa de foco inicial.
+ * 3. Cierre por Clic Exterior: Detecta clics fuera del contenedor (`mousedown`) 
+ *    para ocultar automáticamente el menú desplegable.
+ * 4. Acción de Cierre de Sesión: Expone el callback `onSignOut` para salir del sistema.
+ * ============================================================================
+ */
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, LogOut, MapPin, Menu, Monitor, Store, UserRound, Wifi, WifiOff, type LucideIcon } from "lucide-react";

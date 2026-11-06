@@ -1,3 +1,24 @@
+/**
+ * ============================================================================
+ * COMPONENTE: PaymentDialog (Modal de Cobro y Procesamiento de Pago)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Muestra el cuadro de diálogo para registrar el cobro de una venta activa en el POS,
+ * soportando pago con efectivo y tarjeta.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Atajos de Teclado Globales:
+ *    - F8: Selecciona pago en Efectivo y enfoca el campo de monto recibido.
+ *    - F9: Selecciona pago con Tarjeta.
+ *    - F12: Confirma el cobro y procesa el formulario.
+ * 2. Cálculo en Tiempo Real: Determina automáticamente si falta dinero o el 
+ *    cambio a entregar, operando internamente en centavos para precisión financiera.
+ * 3. Botones Rápidos de Efectivo: Permite seleccionar "Monto Exacto" o denominaciones 
+ *    comunes de billetes (`cashSuggestions`).
+ * 4. Validación: Impide confirmar la venta si el saldo recibido es insuficiente.
+ * ============================================================================
+ */
 import { useEffect, useRef, useState } from "react";
 import { Banknote, CheckCircle2, CreditCard } from "lucide-react";
 import Modal from "./Modal";

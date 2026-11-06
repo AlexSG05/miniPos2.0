@@ -11,6 +11,11 @@ export type Product = {
   description: string | null;
   costCents: number;
   priceCents: number;
+  satKey?: string | null;
+  profitBasisPoints?: number;
+  ivaBasisPoints?: number;
+  iepsBasisPoints?: number;
+  imageData?: string | null;
   stockQuantity: number;
   minStock: number;
   unit: "piece" | "kg" | "g" | "liter" | "ml";
@@ -27,6 +32,11 @@ export type NewProduct = {
   description: string | null;
   costCents: number;
   priceCents: number;
+  satKey: string | null;
+  profitBasisPoints: number;
+  ivaBasisPoints: number;
+  iepsBasisPoints: number;
+  imageData: string | null;
   stockQuantity: number;
   minStock: number;
   unit: Product["unit"];

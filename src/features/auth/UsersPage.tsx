@@ -36,7 +36,7 @@ export default function UsersPage() {
   }
 
   async function changePassword(target: UserInfo) {
-    const next = window.prompt(`Nueva contraseña para ${target.username} (mínimo 10 caracteres):`);
+    const next = window.prompt(`Nueva contraseña para ${target.username} (mínimo 4 caracteres):`);
     if (next === null) return;
     setError(""); setNotice("");
     try { await resetUserPassword(target.id, next); setNotice("Contraseña actualizada; se cerraron sus sesiones anteriores."); }
@@ -57,7 +57,7 @@ export default function UsersPage() {
     <section className="rounded-lg border border-slate-200 bg-white p-4"><h2 className="font-semibold">Agregar usuario</h2><form onSubmit={submit} className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <label className="text-xs text-slate-500">Usuario<input className={`${inputClass} mt-1`} minLength={3} maxLength={40} autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
       <label className="text-xs text-slate-500">Nombre visible<input className={`${inputClass} mt-1`} maxLength={120} value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label>
-      <label className="text-xs text-slate-500">Contraseña<input className={`${inputClass} mt-1`} type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+      <label className="text-xs text-slate-500">Contraseña<input className={`${inputClass} mt-1`} type="password" minLength={4} maxLength={12} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
       <label className="text-xs text-slate-500">Rol<select className={`${inputClass} mt-1`} value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="cashier">Cajero</option><option value="inventory">Inventario</option><option value="admin">Administrador</option></select></label>
       <button disabled={saving} className="self-end rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{saving ? "Creando…" : "Crear usuario"}</button>
     </form><p className="mt-3 text-xs text-slate-500">La contraseña se guarda como hash con sal. Las cuentas desactivadas no pueden iniciar sesión.</p></section>

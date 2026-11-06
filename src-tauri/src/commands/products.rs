@@ -18,6 +18,11 @@ pub struct Product {
     pub description: Option<String>,
     pub cost_cents: i64,
     pub price_cents: i64,
+    pub sat_key: Option<String>,
+    pub profit_basis_points: i64,
+    pub iva_basis_points: i64,
+    pub ieps_basis_points: i64,
+    pub image_data: Option<String>,
     pub stock_quantity: f64,
     pub min_stock: f64,
     pub unit: String,
@@ -36,6 +41,11 @@ pub struct NewProduct {
     pub description: Option<String>,
     pub cost_cents: i64,
     pub price_cents: i64,
+    pub sat_key: Option<String>,
+    pub profit_basis_points: i64,
+    pub iva_basis_points: i64,
+    pub ieps_basis_points: i64,
+    pub image_data: Option<String>,
     pub stock_quantity: f64,
     pub min_stock: f64,
     pub unit: String,
@@ -52,6 +62,11 @@ pub struct ProductUpdate {
     pub description: Option<String>,
     pub cost_cents: i64,
     pub price_cents: i64,
+    pub sat_key: Option<String>,
+    pub profit_basis_points: i64,
+    pub iva_basis_points: i64,
+    pub ieps_basis_points: i64,
+    pub image_data: Option<String>,
     pub min_stock: f64,
     pub unit: String,
 }
@@ -59,7 +74,8 @@ pub struct ProductUpdate {
 const PRODUCT_COLUMNS: &str = "
     id, category_id, (SELECT name FROM categories WHERE id = products.category_id) AS category_name,
     internal_code, barcode, name, description,
-    cost_cents, price_cents, stock_quantity, min_stock, unit,
+    cost_cents, price_cents, sat_key, profit_basis_points, iva_basis_points,
+    ieps_basis_points, image_data, (stock_quantity - stock_debt) AS stock_quantity, min_stock, unit,
     active, created_at, updated_at
 ";
 
@@ -82,6 +98,19 @@ fn validate_product(product: &NewProduct) -> Result<(), String> {
 
     if product.cost_cents < 0 || product.price_cents < 0 {
         return Err("El costo y el precio no pueden ser negativos.".into());
+    }
+
+    if !(0..=100000).contains(&product.profit_basis_points)
+        || !(0..=10000).contains(&product.iva_basis_points)
+        || !(0..=10000).contains(&product.ieps_basis_points)
+    {
+        return Err("Revisa los porcentajes de ganancia, IVA e IEPS.".into());
+    }
+    if product.sat_key.as_ref().is_some_and(|value| value.chars().count() > 20) {
+        return Err("La clave SAT no puede superar 20 caracteres.".into());
+    }
+    if product.image_data.as_ref().is_some_and(|value| value.len() > 3_000_000) {
+        return Err("La imagen del producto supera el tamaÃ±o permitido.".into());
     }
 
     if !product.stock_quantity.is_finite()
@@ -135,6 +164,7 @@ pub async fn list_products(
              OR name LIKE '%' || ?1 || '%'
              OR internal_code LIKE '%' || ?1 || '%'
              OR barcode LIKE '%' || ?1 || '%'
+             OR sat_key LIKE '%' || ?1 || '%'
          )
          ORDER BY name COLLATE NOCASE ASC"
     );
@@ -181,8 +211,9 @@ pub async fn create_product(
     let insert_result = sqlx::query(
         "INSERT INTO products (
             category_id, internal_code, barcode, name, description,
-            cost_cents, price_cents, stock_quantity, min_stock, unit
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            cost_cents, price_cents, sat_key, profit_basis_points, iva_basis_points,
+            ieps_basis_points, image_data, stock_quantity, min_stock, unit
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(product.category_id)
     .bind(internal_code)
@@ -191,6 +222,11 @@ pub async fn create_product(
     .bind(description)
     .bind(product.cost_cents)
     .bind(product.price_cents)
+    .bind(product.sat_key.as_deref().map(str::trim).filter(|value| !value.is_empty()))
+    .bind(product.profit_basis_points)
+    .bind(product.iva_basis_points)
+    .bind(product.ieps_basis_points)
+    .bind(product.image_data)
     .bind(product.stock_quantity)
     .bind(product.min_stock)
     .bind(product.unit)
@@ -218,10 +254,11 @@ pub async fn create_product(
         sqlx::query(
             "INSERT INTO inventory_movements (
                 product_id, movement_type, quantity, previous_quantity,
-                new_quantity, reason
-            ) VALUES (?, 'initial_stock', ?, 0, ?, 'Existencia inicial al crear producto')"
+                new_quantity, net_previous_quantity, net_new_quantity, reason
+            ) VALUES (?, 'initial_stock', ?, 0, ?, 0, ?, 'Existencia inicial al crear producto')"
         )
         .bind(product_id)
+        .bind(product.stock_quantity)
         .bind(product.stock_quantity)
         .bind(product.stock_quantity)
         .execute(&mut *tx)
@@ -269,6 +306,11 @@ pub async fn update_product(
         description: product.description.clone(),
         cost_cents: product.cost_cents,
         price_cents: product.price_cents,
+        sat_key: product.sat_key.clone(),
+        profit_basis_points: product.profit_basis_points,
+        iva_basis_points: product.iva_basis_points,
+        ieps_basis_points: product.ieps_basis_points,
+        image_data: product.image_data.clone(),
         stock_quantity: 0.0,
         min_stock: product.min_stock,
         unit: product.unit.clone(),
@@ -281,6 +323,8 @@ pub async fn update_product(
     let result = sqlx::query(
         "UPDATE products SET category_id = ?, internal_code = ?, barcode = ?,
             name = ?, description = ?, cost_cents = ?, price_cents = ?,
+            sat_key = ?, profit_basis_points = ?, iva_basis_points = ?,
+            ieps_basis_points = ?, image_data = ?,
             min_stock = ?, unit = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ? AND active = 1"
     )
@@ -291,6 +335,11 @@ pub async fn update_product(
     .bind(product.description.map(|value| value.trim().to_owned()).filter(|value| !value.is_empty()))
     .bind(product.cost_cents)
     .bind(product.price_cents)
+    .bind(product.sat_key.as_deref().map(str::trim).filter(|value| !value.is_empty()))
+    .bind(product.profit_basis_points)
+    .bind(product.iva_basis_points)
+    .bind(product.ieps_basis_points)
+    .bind(product.image_data)
     .bind(product.min_stock)
     .bind(product.unit)
     .bind(product.id)
@@ -353,7 +402,10 @@ pub async fn list_inventory_movements(
     require_role(&auth, &session_token, &["admin", "inventory"])?;
     sqlx::query_as::<_, InventoryMovement>(
         "SELECT m.id, m.product_id, p.name AS product_name, m.movement_type,
-                m.quantity, m.previous_quantity, m.new_quantity, m.reason, m.created_at
+                m.quantity,
+                COALESCE(m.net_previous_quantity, m.previous_quantity) AS previous_quantity,
+                COALESCE(m.net_new_quantity, m.new_quantity) AS new_quantity,
+                m.reason, m.created_at
          FROM inventory_movements m JOIN products p ON p.id = m.product_id
          WHERE (? IS NULL OR m.product_id = ?)
          ORDER BY m.created_at DESC, m.id DESC LIMIT 200"
@@ -397,7 +449,7 @@ pub async fn adjust_inventory(
 
     let mut tx = db.0.begin().await.map_err(|_| "No fue posible iniciar el ajuste.".to_string())?;
     let current: Option<(f64, String)> = sqlx::query_as(
-        "SELECT stock_quantity, unit FROM products WHERE id = ? AND active = 1"
+        "SELECT stock_quantity - stock_debt, unit FROM products WHERE id = ? AND active = 1"
     )
     .bind(adjustment.product_id)
     .fetch_optional(&mut *tx)
@@ -415,23 +467,30 @@ pub async fn adjust_inventory(
     } else {
         previous - adjustment.quantity
     };
-    if !new_quantity.is_finite() || new_quantity < 0.0 {
-        return Err("La salida supera las existencias disponibles.".into());
+    if !new_quantity.is_finite() {
+        return Err("El resultado del ajuste no es vÃ¡lido.".into());
     }
 
-    sqlx::query("UPDATE products SET stock_quantity = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
-        .bind(new_quantity)
+    let physical_stock = new_quantity.max(0.0);
+    let stock_debt = (-new_quantity).max(0.0);
+    sqlx::query("UPDATE products SET stock_quantity = ?, stock_debt = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
+        .bind(physical_stock)
+        .bind(stock_debt)
         .bind(adjustment.product_id)
         .execute(&mut *tx)
         .await
         .map_err(|_| "No fue posible actualizar las existencias.".to_string())?;
     sqlx::query(
-        "INSERT INTO inventory_movements (product_id, movement_type, quantity, previous_quantity, new_quantity, reason)
-         VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO inventory_movements (
+            product_id, movement_type, quantity, previous_quantity, new_quantity,
+            net_previous_quantity, net_new_quantity, reason
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(adjustment.product_id)
     .bind(if adjustment.direction == "in" { "purchase" } else { "manual_out" })
     .bind(adjustment.quantity)
+    .bind(previous.max(0.0))
+    .bind(physical_stock)
     .bind(previous)
     .bind(new_quantity)
     .bind(adjustment.reason.trim())

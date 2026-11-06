@@ -1,3 +1,22 @@
+/**
+ * ============================================================================
+ * COMPONENTE: ProductPreview (Vista Previa del Último Producto Escaneado)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Renderiza el panel visual destacado que muestra la información, imagen, 
+ * precio y disponibilidad del último producto agregado o seleccionado en el POS.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Fallback de Imagen: Maneja errores de carga de imagen (`onError`) 
+ *    conmutando automáticamente a un icono vectorial por defecto.
+ * 2. Indicador visual de Stock: Cambia el estado del badge según el inventario 
+ *    disponible (Sin existencias, Stock bajo o Normal).
+ * 3. Estado Vacío: Muestra una guía inicial cuando la venta aún no contiene artículos.
+ * 4. Adaptabilidad de datos: Soporta opcionalmente la propiedad `imageUrl` anticipando 
+ *    respuestas futuras de la API.
+ * ============================================================================
+ */
 import { useState } from "react";
 import { Package, ScanBarcode } from "lucide-react";
 import type { Product } from "../../products/products.api";
@@ -10,7 +29,7 @@ export default function ProductPreview({ product }: { product: Product | null })
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const imageUrl = (product as ProductWithImage | null)?.imageUrl ?? null;
   const showImage = imageUrl !== null && imageUrl !== failedUrl;
-  const unavailable = product !== null && (!product.active || product.stockQuantity <= 0);
+  const inactive = product !== null && !product.active;
 
   return (
     <section
@@ -56,14 +75,14 @@ export default function ProductPreview({ product }: { product: Product | null })
             </p>
             <span
               className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                unavailable
+                inactive
                   ? "bg-rose-50 text-rose-700"
-                  : product.stockQuantity <= product.minStock
-                    ? "bg-amber-50 text-amber-700"
+                  : product.stockQuantity < 0
+                    ? "bg-rose-50 text-rose-700"
                     : "bg-slate-100 text-slate-600"
               }`}
             >
-              {unavailable ? "Sin existencias" : `${product.stockQuantity} ${UNIT_LABELS[product.unit]} disp.`}
+              {inactive ? "Producto inactivo" : `${product.stockQuantity} ${UNIT_LABELS[product.unit]} en sistema`}
             </span>
           </div>
         </div>

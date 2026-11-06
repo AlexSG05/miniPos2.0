@@ -1,3 +1,21 @@
+/**
+ * ============================================================================
+ * COMPONENTE: Modal (Contenedor Base de Diálogos Accesibles)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Renderiza una capa superpuesta (overlay) accesible para ventanas emergentes.
+ *
+ * CARACTERÍSTICAS CLAVE:
+ * 1. Accesibilidad ARIA: Implementa `role="dialog"`, `aria-modal="true"` y 
+ *    `aria-labelledby` vinculado automáticamente mediante `useId()`.
+ * 2. Trampa de Foco (Focus Trap): Atrapa la navegación por teclado (`Tab` / `Shift+Tab`) 
+ *    para evitar que el usuario interactúe con la página detrás del modal.
+ * 3. Atajos de Teclado: Cierra la ventana al presionar la tecla `Escape`.
+ * 4. Cierre por Overlay: Cierra al hacer clic en el fondo oscuro exterior 
+ *    (validando `event.target === event.currentTarget`).
+ * ============================================================================
+ */
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 type Props = {

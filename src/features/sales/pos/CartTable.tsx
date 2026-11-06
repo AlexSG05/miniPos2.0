@@ -1,3 +1,22 @@
+/**
+ * ============================================================================
+ * COMPONENTE: CartTable (Tabla de Carrito del Punto de Venta)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Muestra y gestiona los productos de la venta en curso dentro del sistema POS.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Visualización de ítems: Lista productos con su código, precio, subtotal y descuentos.
+ * 2. Edición fluida de Cantidades (QuantityCell): Soporta edición directa por teclado o 
+ *    botones +/- ajustados a la unidad de medida (piezas, kg, etc.).
+ * 3. Descuentos por renglón (DiscountCell): Edición de % de descuento por ítem.
+ * 4. Navegación y Foco: Maneja teclas Enter/Escape para confirmar o cancelar edición 
+ *    y devuelve el foco al lector de código de barras mediante `onDone`.
+ * 5. Auto-Scroll: Desplaza la tabla automáticamente al producto seleccionado.
+ * 6. Estado Vacío (EmptyState): Muestra guía visual y atajos cuando el carrito está vacío.
+ * ============================================================================
+ */
 import { useEffect, useRef, useState } from "react";
 import { Minus, Plus, ScanBarcode, Trash2 } from "lucide-react";
 import {

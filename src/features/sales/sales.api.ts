@@ -33,7 +33,7 @@ export type DailySalesReport = {
   cashCents: number;
   cardCents: number;
   bestSellers: { productName: string; quantitySold: number; salesCents: number }[];
-  lowStock: { id: number; name: string; stockQuantity: number; minStock: number; unit: string }[];
+  negativeStock: { id: number; name: string; stockQuantity: number; unit: string }[];
 };
 
 export function searchSaleProducts(search: string) {

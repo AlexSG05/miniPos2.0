@@ -1,3 +1,22 @@
+/**
+ * ============================================================================
+ * COMPONENTE: TotalsCard (Tarjeta de Desglose de Totales POS)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Muestra el resumen financiero y operativo en tiempo real de la venta activa 
+ * (Subtotal, Descuento, Total a Pagar, Contador de Artículos, Peso y Folio previo).
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Escala Tipográfica Dinámica: Reduce el tamaño de fuente del Total 
+ *    (`text-6xl`, `text-5xl`, `text-4xl`) según la cantidad de dígitos para 
+ *    prevenir desbordamientos visuales.
+ * 2. Accesibilidad ARIA: Implementa `aria-live="polite"` para anunciar cambios 
+ *    en el importe total a lectores de pantalla.
+ * 3. Métricas Operativas: Resume el peso total en KG y el número de piezas/artículos.
+ * 4. Referencia de Auditoría: Muestra el folio de la última transacción confirmada.
+ * ============================================================================
+ */
 import { amount, money, type Totals } from "./pos.utils";
 
 type Props = { totals: Totals; lastFolio: string | null };
@@ -25,7 +44,6 @@ export default function TotalsCard({ totals, lastFolio }: Props) {
           value={totals.discountCents > 0 ? `−${money(totals.discountCents)}` : money(0)}
           accent={totals.discountCents > 0}
         />
-        <Row label="Impuestos" value={money(totals.taxCents)} />
       </dl>
 
       <div className="rounded-xl bg-slate-950 px-5 pb-4 pt-3.5 ring-1 ring-slate-800">
@@ -38,7 +56,7 @@ export default function TotalsCard({ totals, lastFolio }: Props) {
           <span aria-hidden className="text-3xl font-bold text-green-500/70">$</span>
           <span aria-hidden>{total}</span>
         </p>
-        <dl className="mt-3.5 grid grid-cols-3 gap-2 border-t border-slate-800 pt-3 text-xs">
+        <dl className="mt-2.5 grid grid-cols-2 gap-2 border-t border-slate-800 pt-2 text-xs">
           <div>
             <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Folio</dt>
             <dd className="mt-0.5 font-semibold text-slate-200">Nuevo</dd>
@@ -47,10 +65,12 @@ export default function TotalsCard({ totals, lastFolio }: Props) {
             <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Art:</dt>
             <dd className="mt-0.5 font-semibold tabular-nums text-slate-200">{totals.articleCount.toFixed(2)}</dd>
           </div>
-          <div className="text-right">
-            <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Peso</dt>
-            <dd className="mt-0.5 font-semibold tabular-nums text-slate-200">{totals.weightKg.toFixed(3)} KG</dd>
-          </div>
+         {/*
+          *<div className="text-right">
+            *<dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Peso</dt>
+           * <dd className="mt-0.5 font-semibold tabular-nums text-slate-200">{totals.weightKg.toFixed(3)} KG</dd>
+          *</div>
+          */}
         </dl>
         {lastFolio && <p className="mt-2.5 truncate text-[11px] text-slate-500">Última venta: {lastFolio}</p>}
       </div>

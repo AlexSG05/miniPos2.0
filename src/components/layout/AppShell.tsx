@@ -1,88 +1,76 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Activity } from "lucide-react";
+import { useAuth } from "../../features/auth/useAuth";
 import { getOpenCashSession } from "../../features/cash-register/cash.api";
 import { getBusinessSettings } from "../../features/settings/settings.api";
-import { Activity, LogOut, Store } from "lucide-react";
-import { useAuth } from "../../features/auth/useAuth";
-import { navLinks as links } from "./navLinks";
+import PosHeader from "../../features/sales/pos/PosHeader";
+import { useOnlineStatus } from "../../features/sales/pos/pos.hooks";
+import { posMenuFor } from "../../features/sales/pos/pos.menu";
+import { TERMINAL } from "../../features/sales/pos/terminal.config";
+import { useLocation } from "react-router-dom";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { user, signOut } = useAuth();
-  const [cashIsOpen, setCashIsOpen] = useState(false);
+  const [cashIsOpen, setCashIsOpen] = useState<boolean | null>(null);
   const [businessName, setBusinessName] = useState("MiniPOS");
+  const online = useOnlineStatus();
   const isSalesPage = location.pathname === "/ventas";
-  const pageTitle = links.find((link) => link.to === location.pathname)?.label ?? "MiniPOS";
+  const menuItems = useMemo(() => user ? posMenuFor(user.role) : [], [user]);
 
   useEffect(() => {
-    if (isSalesPage) return; // el POS consulta el turno por su cuenta
     let active = true;
-    const refresh = () => {
-      if (user?.role === "inventory") { setCashIsOpen(false); return; }
+    const loadSettings = () => {
+      void getBusinessSettings().then((settings) => {
+        if (active) setBusinessName(settings.businessName);
+      }).catch(() => undefined);
+    };
+    const loadCash = () => {
+      if (user?.role === "inventory") {
+        setCashIsOpen(null);
+        return;
+      }
       void getOpenCashSession().then((session) => {
         if (active) setCashIsOpen(session !== null);
-      }).catch(() => { if (active) setCashIsOpen(false); });
+      }).catch(() => {
+        if (active) setCashIsOpen(null);
+      });
     };
-    void getBusinessSettings().then((settings) => {
-      if (active) setBusinessName(settings.businessName);
-    }).catch(() => undefined);
-    refresh();
-    const interval = window.setInterval(refresh, 15000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, [isSalesPage, location.pathname, user?.role]);
 
-  // El punto de venta usa pantalla completa y trae su propio header compacto (con menú de navegación).
-  if (isSalesPage) {
-    return <div className="app-frame h-dvh overflow-hidden bg-slate-100">{children}</div>;
-  }
+    loadSettings();
+    loadCash();
+    const interval = window.setInterval(loadCash, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.role]);
 
   return (
-    <div className="app-frame flex min-h-screen flex-col bg-slate-50 text-slate-800">
-      <header className="shrink-0 border-b border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="rounded-xl bg-blue-600 p-2 text-white shadow-sm"><Store size={19} /></div>
-            <div className="min-w-0">
-              <strong className="block truncate text-sm font-bold text-slate-900">{businessName}</strong>
-              <small className="text-xs text-slate-500">{pageTitle}</small>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 sm:flex">
-              <span className={`h-2 w-2 rounded-full ${cashIsOpen ? "bg-emerald-500" : "bg-slate-400"}`} />
-              {cashIsOpen ? "Caja abierta" : "Caja sin abrir"}
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 font-bold text-blue-700">
-                {user?.displayName.slice(0, 2).toUpperCase()}
-              </span>
-              <span className="hidden max-w-36 truncate font-medium text-slate-700 sm:inline">{user?.displayName}</span>
-              <button type="button" onClick={() => void signOut()} title="Cerrar sesión" className="rounded-lg p-2 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600">
-                <LogOut size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-        <nav className="flex items-center gap-1 overflow-x-auto px-4" aria-label="Navegación principal">
-          {links.filter((link) => user && link.roles.includes(user.role)).map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) =>
-              `flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-xs font-semibold transition-colors ${
-                isActive ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:border-blue-200 hover:text-blue-700"
-              }`
-            }>
-              <Icon size={16} /><span>{label}</span>
-            </NavLink>
-          ))}
-        </nav>
-      </header>
-      <main className="main-area min-h-0 flex-1 bg-slate-50">
-        <section className="page-content p-4 sm:p-5">{children}</section>
+    <div className="app-frame flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-800">
+      <PosHeader
+        businessName={businessName}
+        cashierName={user?.displayName ?? "—"}
+        registerName={TERMINAL.registerName}
+        branchName={TERMINAL.branchName}
+        serverLabel={TERMINAL.serverLabel}
+        online={online}
+        shiftOpen={cashIsOpen}
+        menuItems={menuItems}
+        onSignOut={() => void signOut()}
+      />
+      <main className={`main-area min-h-0 flex-1 overflow-hidden ${isSalesPage ? "bg-slate-100" : "bg-slate-50"}`}>
+        <section className={`page-content h-full min-h-0 overflow-hidden ${isSalesPage ? "p-0" : "p-4 sm:p-5"}`}>
+          {children}
+        </section>
       </main>
-      <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
-        <span className="flex items-center gap-1"><Activity size={12} /> Modo local</span>
-        <span>MiniPOS · V0.1.0</span>
-      </footer>
+      {!isSalesPage && (
+        <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
+          <span className="flex items-center gap-1"><Activity size={12} /> Modo local</span>
+          <span>MiniPOS · V0.1.0</span>
+        </footer>
+      )}
     </div>
   );
 }

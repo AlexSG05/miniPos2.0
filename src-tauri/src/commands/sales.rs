@@ -95,11 +95,10 @@ pub struct BestSeller {
 
 #[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct LowStockProduct {
+pub struct NegativeStockProduct {
     pub id: i64,
     pub name: String,
     pub stock_quantity: f64,
-    pub min_stock: f64,
     pub unit: String,
 }
 
@@ -117,7 +116,7 @@ pub struct DailySalesReport {
     pub cash_cents: i64,
     pub card_cents: i64,
     pub best_sellers: Vec<BestSeller>,
-    pub low_stock: Vec<LowStockProduct>,
+    pub negative_stock: Vec<NegativeStockProduct>,
 }
 
 #[tauri::command]
@@ -199,11 +198,12 @@ pub async fn get_sales_report(db: State<'_, Database>, auth: State<'_, AuthState
          WHERE s.status = 'completed' AND date(s.created_at, '-6 hours') BETWEEN COALESCE(?, date('now', '-6 hours')) AND COALESCE(?, date('now', '-6 hours'))
          GROUP BY i.product_name ORDER BY quantity_sold DESC, sales_cents DESC LIMIT 5"
     ).bind(&start_date).bind(&end_date).fetch_all(&db.0).await.map_err(|_| "No fue posible consultar los productos más vendidos.".to_string())?;
-    let low_stock = sqlx::query_as::<_, LowStockProduct>(
-        "SELECT id, name, stock_quantity, min_stock, unit FROM products
-         WHERE active = 1 AND stock_quantity <= min_stock ORDER BY stock_quantity ASC, name COLLATE NOCASE LIMIT 100"
-    ).fetch_all(&db.0).await.map_err(|_| "No fue posible consultar productos con stock bajo.".to_string())?;
-    Ok(DailySalesReport { date, gross_cents, discounts_cents, refund_cents, refunded_subtotal_cents, tax_cents, total_cents, operations, cash_cents, card_cents, best_sellers, low_stock })
+    let negative_stock = sqlx::query_as::<_, NegativeStockProduct>(
+        "SELECT id, name, stock_quantity - stock_debt AS stock_quantity, unit FROM products
+         WHERE active = 1 AND stock_quantity - stock_debt < 0
+         ORDER BY stock_quantity - stock_debt ASC, name COLLATE NOCASE LIMIT 100"
+    ).fetch_all(&db.0).await.map_err(|_| "No fue posible consultar productos con inventario negativo.".to_string())?;
+    Ok(DailySalesReport { date, gross_cents, discounts_cents, refund_cents, refunded_subtotal_cents, tax_cents, total_cents, operations, cash_cents, card_cents, best_sellers, negative_stock })
 }
 
 async fn receipt_by_operation(db: &sqlx::SqlitePool, operation_id: &str) -> Result<Option<SaleReceipt>, String> {
@@ -241,17 +241,16 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
         if item.product_id <= 0 || item.quantity_milli <= 0 {
             return Err("Hay un producto o una cantidad no válida en la venta.".into());
         }
-        let row = sqlx::query_as::<_, (String, String, i64, i64, f64, bool, String)>(
-            "SELECT name, internal_code, price_cents, cost_cents, stock_quantity, active, unit FROM products WHERE id = ?"
+        let row = sqlx::query_as::<_, (String, String, i64, i64, bool, String)>(
+            "SELECT name, internal_code, price_cents, cost_cents, active, unit
+             FROM products WHERE id = ?"
         ).bind(item.product_id).fetch_optional(&mut *tx).await
             .map_err(|_| "No fue posible validar los productos de la venta.".to_string())?
             .ok_or_else(|| "Uno de los productos ya no existe.".to_string())?;
-        if !row.5 { return Err(format!("{} está inactivo.", row.0)); }
-        if row.6 == "piece" && item.quantity_milli % 1000 != 0 {
+        if !row.4 { return Err(format!("{} está inactivo.", row.0)); }
+        if row.5 == "piece" && item.quantity_milli % 1000 != 0 {
             return Err(format!("{} se vende en piezas enteras.", row.0));
         }
-        let available_milli = (row.4 * 1000.0).floor() as i64;
-        if item.quantity_milli > available_milli { return Err(format!("Stock insuficiente para {}.", row.0)); }
         let line_calc = (row.2 as i128).checked_mul(item.quantity_milli as i128)
             .ok_or_else(|| "El importe de la venta excede el límite permitido.".to_string())?;
         let line_total = i64::try_from((line_calc + 500) / 1000)
@@ -295,17 +294,26 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
 
     for (product_id, quantity_milli, name, code, price, cost, line_total) in prepared {
         let quantity = quantity_milli as f64 / 1000.0;
-        let updated = sqlx::query("UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND stock_quantity >= ?")
-            .bind(quantity).bind(product_id).bind(quantity).execute(&mut *tx).await
+        let updated = sqlx::query("UPDATE products SET
+                stock_quantity = MAX(stock_quantity - stock_debt - ?, 0),
+                stock_debt = MAX(stock_debt + ? - stock_quantity, 0),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ? AND active = 1")
+            .bind(quantity).bind(quantity).bind(product_id).execute(&mut *tx).await
             .map_err(|_| "No fue posible descontar existencias.".to_string())?;
-        if updated.rows_affected() != 1 { return Err(format!("Stock insuficiente para {name}; no se cobró la venta.")); }
+        if updated.rows_affected() != 1 { return Err(format!("No fue posible actualizar las existencias de {name}.")); }
         sqlx::query("INSERT INTO sale_items (sale_id, product_id, product_name, internal_code, quantity, unit_price_cents, unit_cost_cents, line_total_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(sale_id).bind(product_id).bind(&name).bind(&code).bind(quantity).bind(price).bind(cost).bind(line_total)
             .execute(&mut *tx).await.map_err(|_| "No fue posible guardar el detalle de la venta.".to_string())?;
-        let new_stock: f64 = sqlx::query_scalar("SELECT stock_quantity FROM products WHERE id = ?")
+        let new_stock: f64 = sqlx::query_scalar("SELECT stock_quantity - stock_debt FROM products WHERE id = ?")
             .bind(product_id).fetch_one(&mut *tx).await.map_err(|_| "No fue posible recuperar las existencias.".to_string())?;
-        sqlx::query("INSERT INTO inventory_movements (product_id, movement_type, quantity, previous_quantity, new_quantity, reason, sale_id) VALUES (?, 'sale', ?, ?, ?, ?, ?)")
-            .bind(product_id).bind(quantity).bind(new_stock + quantity).bind(new_stock).bind(format!("Venta {folio}")).bind(&folio)
+        let previous_stock = new_stock + quantity;
+        sqlx::query("INSERT INTO inventory_movements (
+                product_id, movement_type, quantity, previous_quantity, new_quantity,
+                net_previous_quantity, net_new_quantity, reason, sale_id
+            ) VALUES (?, 'sale', ?, ?, ?, ?, ?, ?, ?)")
+            .bind(product_id).bind(quantity).bind(previous_stock.max(0.0)).bind(new_stock.max(0.0))
+            .bind(previous_stock).bind(new_stock).bind(format!("Venta {folio}")).bind(&folio)
             .execute(&mut *tx).await.map_err(|_| "No fue posible registrar la salida de inventario.".to_string())?;
     }
     sqlx::query("INSERT INTO sale_payments (sale_id, method, amount_cents, received_cents, change_cents) VALUES (?, ?, ?, ?, ?)")
@@ -366,14 +374,19 @@ pub async fn void_sale(db: State<'_, Database>, auth: State<'_, AuthState>, sess
     let items = sqlx::query_as::<_, (i64, f64)>("SELECT product_id, quantity FROM sale_items WHERE sale_id = ?")
         .bind(sale.0).fetch_all(&mut *tx).await.map_err(|_| "No fue posible recuperar los productos de la venta.".to_string())?;
     for (product_id, quantity) in items {
-        let previous: f64 = sqlx::query_scalar("SELECT stock_quantity FROM products WHERE id = ?")
+        let previous: f64 = sqlx::query_scalar("SELECT stock_quantity - stock_debt FROM products WHERE id = ?")
             .bind(product_id).fetch_one(&mut *tx).await.map_err(|_| "No fue posible recuperar las existencias.".to_string())?;
         let next = previous + quantity;
         if !next.is_finite() { return Err("La devolución excede el límite de inventario.".into()); }
-        sqlx::query("UPDATE products SET stock_quantity = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
-            .bind(next).bind(product_id).execute(&mut *tx).await.map_err(|_| "No fue posible reponer las existencias.".to_string())?;
-        sqlx::query("INSERT INTO inventory_movements (product_id, movement_type, quantity, previous_quantity, new_quantity, reason, sale_id) VALUES (?, 'return', ?, ?, ?, ?, ?)")
-            .bind(product_id).bind(quantity).bind(previous).bind(next).bind(format!("Devolución {folio}: {reason}")).bind(folio)
+        sqlx::query("UPDATE products SET
+                stock_quantity = MAX(?, 0), stock_debt = MAX(-?, 0),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
+            .bind(next).bind(next).bind(product_id).execute(&mut *tx).await.map_err(|_| "No fue posible reponer las existencias.".to_string())?;
+        sqlx::query("INSERT INTO inventory_movements (
+                product_id, movement_type, quantity, previous_quantity, new_quantity,
+                net_previous_quantity, net_new_quantity, reason, sale_id
+            ) VALUES (?, 'return', ?, ?, ?, ?, ?, ?, ?)")
+            .bind(product_id).bind(quantity).bind(previous.max(0.0)).bind(next.max(0.0)).bind(previous).bind(next).bind(format!("Devolucion {folio}: {reason}")).bind(folio)
             .execute(&mut *tx).await.map_err(|_| "No fue posible registrar el retorno de inventario.".to_string())?;
     }
     tx.commit().await.map_err(|_| "No fue posible confirmar la anulación.".to_string())?;

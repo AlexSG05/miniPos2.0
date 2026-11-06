@@ -5,6 +5,6 @@
  */
 export const TERMINAL = {
   registerName: "Caja 1",
-  branchName: "Villa Izcalli",
-  serverLabel: "Local · SQLite",
+  branchName: "Tamasulas",
+  serverLabel: "Local",
 } as const;

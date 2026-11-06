@@ -1,3 +1,20 @@
+/**
+ * ============================================================================
+ * COMPONENTE: ConfirmDialog (Diálogo de Confirmación Modal)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Muestra una ventana modal de confirmación reutilizable para acciones críticas 
+ * (ej. eliminar ítems, cancelar venta o cerrar sesión).
+ *
+ * DETALLES TÉCNICOS:
+ * 1. Sustituye `window.confirm()` nativo para garantizar compatibilidad completa 
+ *    en WebViews, Electron y navegadores móviles.
+ * 2. Seguridad UX: Aplica `autoFocus` en el botón de cancelar para evitar que el 
+ *    usuario confirme por error al presionar la tecla Enter rápidamente.
+ * 3. Diseño: Construido con Tailwind CSS sobre el componente base `<Modal />`.
+ * ============================================================================
+ */
 import Modal from "./Modal";
 
 type Props = {

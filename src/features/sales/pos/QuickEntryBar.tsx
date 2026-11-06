@@ -1,3 +1,24 @@
+
+/**
+ * ============================================================================
+ * COMPONENTE: QuickEntryBar (Barra Inferior de Captura Rápida y Cobro POS)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Componente interactivo clave del POS para la captura rápida de productos 
+ * (mediante lectura de código de barras o búsqueda manual) y activación del cobro.
+ *
+ * FUNCIONALIDADES CLAVE:
+ * 1. Campo de Cantidad (F2): Define multiplicadores antes de escanear y transfiere 
+ *    el foco al campo de código al presionar Enter.
+ * 2. Autocompletado WAI-ARIA (F4): Lista de sugerencias dinámica navegable por 
+ *    teclado (Flechas arriba/abajo + Enter) con alertas de inventario.
+ * 3. Disparador de Cobro (F12): Botón de confirmación global con contador visual 
+ *    de artículos que activa la pasarela de pago.
+ * 4. Optimizado para Lectores de Código: Diseñado para recibir entradas continuas 
+ *    de escáneres láser/USB sin perder el foco del cursor.
+ * ============================================================================
+ */
 import type { KeyboardEvent, RefObject } from "react";
 import { ScanBarcode } from "lucide-react";
 import type { Product } from "../../products/products.api";
@@ -64,7 +85,7 @@ export default function QuickEntryBar({
               className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-80 overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
             >
               {suggestions.map((product, index) => {
-                const unavailable = !product.active || product.stockQuantity <= 0;
+                const inactive = !product.active;
                 return (
                   <li
                     key={product.id}
@@ -75,7 +96,7 @@ export default function QuickEntryBar({
                     onClick={() => onPick(product)}
                     className={`flex cursor-pointer items-center justify-between gap-4 rounded-lg px-3 py-2.5 ${
                       index === highlight ? "bg-blue-50" : ""
-                    } ${unavailable ? "opacity-60" : ""}`}
+                    } ${inactive ? "opacity-60" : ""}`}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-900">{product.name}</p>
@@ -86,8 +107,8 @@ export default function QuickEntryBar({
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-sm font-bold tabular-nums text-slate-900">{money(product.priceCents)}</p>
-                      <p className={`text-xs ${unavailable ? "text-rose-600" : "text-slate-500"}`}>
-                        {unavailable ? "Sin existencias" : `${product.stockQuantity} ${UNIT_LABELS[product.unit]}`}
+                      <p className={`text-xs ${inactive ? "text-rose-600" : "text-slate-500"}`}>
+                        {inactive ? "Producto inactivo" : `${product.stockQuantity} ${UNIT_LABELS[product.unit]} en sistema`}
                       </p>
                     </div>
                   </li>

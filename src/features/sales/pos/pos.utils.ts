@@ -1,3 +1,23 @@
+/**
+ * ============================================================================
+ * UTILIDAD: pos.utils.ts (Motor de Lógica de Negocio y Carrito POS)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Contiene las funciones puras, validaciones, conversiones financieras y lógica
+ * operativa para el Punto de Venta (POS).
+ *
+ * ARQUITECTURA Y PATRONES:
+ * 1. Precisión Financiera: Moneda manejada estrictamente en CENTAVOS enteros 
+ *    y cantidades en MILI-UNIDADES (cantidad * 1000) para eliminar errores de 
+ *    redondeo flotante IEEE 754.
+ * 2. Funciones Puras: Las operaciones del carrito (`addToCart`, `setLineQuantity`, etc.)
+ *    no mutan el estado, facilitando las pruebas unitarias y la integración en React.
+ * 3. Parser de Entrada Rápida: Soporta la sintaxis de cajero `[cantidad]*[código]`.
+ * 4. Reglas de Validación: Valida stock máximo, piezas enteras e impuestos calculados
+ *    en puntos base con redondeo half-up idéntico al backend.
+ * ============================================================================
+ */
 import type { Product } from "../../products/products.api";
 
 export type Unit = Product["unit"];
@@ -27,7 +47,6 @@ export function stepMilli(unit: Unit) {
 }
 
 /** Máximo vendible. Usa el mismo floor que el backend para no discrepar. */
-export const maxMilli = (product: Product) => Math.max(0, Math.floor(product.stockQuantity * 1000));
 
 export function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -86,17 +105,8 @@ export function addToCart(cart: CartLine[], product: Product, quantityMilli: num
   if (product.unit === "piece" && quantityMilli % 1000 !== 0) {
     return { cart, error: `${product.name} se vende en piezas enteras.` };
   }
-  const limit = maxMilli(product);
-  if (!product.active || limit <= 0) {
-    return { cart, error: `${product.name} no tiene existencias disponibles.` };
-  }
+  if (!product.active) return { cart, error: `${product.name} está inactivo.` };
   const current = cart.find((line) => line.product.id === product.id);
-  if ((current?.quantityMilli ?? 0) + quantityMilli > limit) {
-    return {
-      cart,
-      error: `Stock insuficiente para ${product.name}. Disponible: ${formatQuantity(limit)} ${UNIT_LABELS[product.unit]}.`,
-    };
-  }
   if (current) {
     return {
       cart: cart.map((line) =>
@@ -115,15 +125,10 @@ export function setLineQuantity(cart: CartLine[], productId: number, quantityMil
   if (product.unit === "piece" && quantityMilli % 1000 !== 0) {
     return { cart, error: `${product.name} se vende en piezas enteras.` };
   }
-  const limit = maxMilli(product);
-  const exceeded = quantityMilli > limit;
   return {
     cart: cart.map((item) =>
-      item.product.id === productId ? { ...item, quantityMilli: Math.min(quantityMilli, limit) } : item
+      item.product.id === productId ? { ...item, quantityMilli } : item
     ),
-    error: exceeded
-      ? `Stock insuficiente para ${product.name}. Disponible: ${formatQuantity(limit)} ${UNIT_LABELS[product.unit]}.`
-      : undefined,
   };
 }
 

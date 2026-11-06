@@ -1,10 +1,29 @@
+/**
+ * ============================================================================
+ * PÁGINA / COMPONENTE PRINCIPAL: SalesPage (Vista Operativa del POS)
+ * ============================================================================
+ * 
+ * PROPÓSITO:
+ * Orquestador principal del Punto de Venta. Integra la gestión del carrito, 
+ * lectura de códigos de barras, atajos de teclado globales y procesamiento de cobros.
+ *
+ * ARQUITECTURA Y CARACTERÍSTICAS CLAVE:
+ * 1. Sincronización Estado/Ref (cartRef): Previene duplicaciones de ítems causadas 
+ *    por disparos ultra rápidos de lectores de código de barras USB/láser.
+ * 2. Atajos de Teclado Globales:
+ *    - F1: Cancelar venta | F2: Cantidad | F3: Descuento fila | F4: Buscar | F12: Cobrar.
+ * 3. Idempotencia en Transacciones: Usa UUIDs y fingerprints de carga para evitar 
+ *    ventas duplicadas al reintentar envíos a la API.
+ * 4. Control de Turno: Bloquea las operaciones de cobro si no existe una caja abierta (`CashSession`).
+ * 5. Reenfoque Persistente: Mantiene el foco de la pantalla en el campo de código principal.
+ * ============================================================================
+ */
 import {
   useCallback, useEffect, useMemo, useRef, useState,
   type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
-import { useAuth } from "../auth/useAuth";
 import { getOpenCashSession, type CashSession } from "../cash-register/cash.api";
 import type { Product } from "../products/products.api";
 import { getBusinessSettings } from "../settings/settings.api";
@@ -13,29 +32,22 @@ import CartTable from "./pos/CartTable";
 import ClockCard from "./pos/ClockCard";
 import ConfirmDialog from "./pos/ConfirmDialog";
 import PaymentDialog, { type PaymentMethod } from "./pos/PaymentDialog";
-import PosHeader from "./pos/PosHeader";
 import ProductPreview from "./pos/ProductPreview";
 import QuickEntryBar from "./pos/QuickEntryBar";
 import TotalsCard from "./pos/TotalsCard";
-import { useOnlineStatus } from "./pos/pos.hooks";
-import { posMenuFor } from "./pos/pos.menu";
 import {
   addToCart, calculateTotals, findExact, looksLikeBarcode, money, parseEntry, parseQuantityInput,
   removeFromCart, setLineDiscount, setLineQuantity, type CartLine,
 } from "./pos/pos.utils";
-import { TERMINAL } from "./pos/terminal.config";
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const NO_SUGGESTIONS = { term: "", items: [] as Product[] };
 
 export default function SalesPage() {
-  const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const online = useOnlineStatus();
 
   const [cash, setCash] = useState<CashSession | null>(null);
   const [cashLoaded, setCashLoaded] = useState(false);
-  const [businessName, setBusinessName] = useState("MiniPOS");
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState<number | null>(null);
 
   // El carrito vive también en un ref para validar sin depender del último render
@@ -87,7 +99,6 @@ export default function SalesPage() {
       .then((settings) => {
         if (!active) return;
         setTaxRateBasisPoints(settings.taxRateBasisPoints);
-        setBusinessName(settings.businessName);
       })
       .catch((err) => { if (active) setError(messageOf(err)); });
     return () => { active = false; };
@@ -118,7 +129,6 @@ export default function SalesPage() {
   }, [searchTerm]);
 
   const totals = useMemo(() => calculateTotals(cart, taxRateBasisPoints), [cart, taxRateBasisPoints]);
-  const menuItems = useMemo(() => (user ? posMenuFor(user.role) : []), [user]);
 
   /* ---------- Captura ---------- */
   function handleQueryChange(value: string) {
@@ -369,19 +379,8 @@ export default function SalesPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-100 text-slate-800">
-      <PosHeader
-        businessName={businessName}
-        cashierName={user?.displayName ?? "—"}
-        registerName={TERMINAL.registerName}
-        branchName={TERMINAL.branchName}
-        serverLabel={TERMINAL.serverLabel}
-        online={online}
-        shiftOpen={cashLoaded ? cash !== null : null}
-        menuItems={menuItems}
-        onSignOut={() => void signOut()}
-      />
 
-      <div className="min-h-0 flex-1 overflow-auto lg:overflow-hidden" onClick={handleWorkspaceClick}>
+      <div className="min-h-0 flex-1 overflow-hidden" onClick={handleWorkspaceClick}>
         <div className="grid min-h-full grid-cols-1 gap-3 p-3 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,2.1fr)_minmax(340px,1fr)] lg:gap-4 lg:p-4">
           <section className="flex min-h-[460px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
             {(error || receipt || (cashLoaded && !cash)) && (
@@ -459,8 +458,8 @@ export default function SalesPage() {
           </section>
 
           <aside className="flex min-h-0 min-w-0 flex-col gap-3 lg:gap-4">
-            <ProductPreview product={lastProduct} />
             <ClockCard />
+            <ProductPreview product={lastProduct} />
             <TotalsCard totals={totals} lastFolio={lastFolio} />
           </aside>
         </div>
