@@ -11,7 +11,7 @@
  * 1. Sincronización Estado/Ref (cartRef): Previene duplicaciones de ítems causadas 
  *    por disparos ultra rápidos de lectores de código de barras USB/láser.
  * 2. Atajos de Teclado Globales:
- *    - F1: Cancelar venta | F2: Cantidad | F3: Descuento fila | F4: Buscar | F12: Cobrar.
+ *    - F1: Cancelar venta | F2: Cantidad de captura | F3: Editar artículo | F4: Buscar | F12: Cobrar.
  * 3. Idempotencia en Transacciones: Usa UUIDs y fingerprints de carga para evitar 
  *    ventas duplicadas al reintentar envíos a la API.
  * 4. Control de Turno: Bloquea las operaciones de cobro si no existe una caja abierta (`CashSession`).
@@ -20,14 +20,16 @@
  */
 import {
   useCallback, useEffect, useMemo, useRef, useState,
-  type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
+  type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AlertCircle, CheckCircle2, X } from "lucide-react";
+import { AlertCircle, Banknote, CheckCircle2, X } from "lucide-react";
 import { getOpenCashSession, type CashSession } from "../cash-register/cash.api";
 import type { Product } from "../products/products.api";
 import { getBusinessSettings } from "../settings/settings.api";
 import { completeSale, searchSaleProducts, type SaleReceipt } from "./sales.api";
+import { authorizeAdminAction, listActiveAdmins, type AdminOption } from "../auth/auth.api";
+import { useAuth } from "../auth/useAuth";
 import CartTable from "./pos/CartTable";
 import ClockCard from "./pos/ClockCard";
 import ConfirmDialog from "./pos/ConfirmDialog";
@@ -35,6 +37,7 @@ import PaymentDialog, { type PaymentMethod } from "./pos/PaymentDialog";
 import ProductPreview from "./pos/ProductPreview";
 import QuickEntryBar from "./pos/QuickEntryBar";
 import TotalsCard from "./pos/TotalsCard";
+import CashWithdrawalDialog from "../cash-register/CashWithdrawalDialog";
 import {
   addToCart, calculateTotals, findExact, looksLikeBarcode, money, parseEntry, parseQuantityInput,
   removeFromCart, setLineDiscount, setLineQuantity, type CartLine,
@@ -45,6 +48,8 @@ const NO_SUGGESTIONS = { term: "", items: [] as Product[] };
 
 export default function SalesPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canManageCart = user?.role === "admin" || user?.role === "cashier";
 
   const [cash, setCash] = useState<CashSession | null>(null);
   const [cashLoaded, setCashLoaded] = useState(false);
@@ -64,9 +69,19 @@ export default function SalesPage() {
   const [highlight, setHighlight] = useState(0);
 
   const [paying, setPaying] = useState(false);
+  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payError, setPayError] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+  const [clearAuthOpen, setClearAuthOpen] = useState(false);
+  const [adminAction, setAdminAction] = useState<{ kind: "edit" | "remove"; productId: number } | null>(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminUsername, setAdminUsername] = useState("");
+  const [adminOptions, setAdminOptions] = useState<AdminOption[]>([]);
+  const [adminQuantityText, setAdminQuantityText] = useState("");
+  const [adminDiscountText, setAdminDiscountText] = useState("");
+  const [adminActionError, setAdminActionError] = useState("");
+  const [adminActionSaving, setAdminActionSaving] = useState(false);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState<SaleReceipt | null>(null);
 
@@ -103,6 +118,14 @@ export default function SalesPage() {
       .catch((err) => { if (active) setError(messageOf(err)); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (user?.role !== "cashier") return;
+    listActiveAdmins().then((admins) => {
+      setAdminOptions(admins);
+      setAdminUsername((current) => current || admins[0]?.username || "");
+    }).catch((cause) => setAdminActionError(messageOf(cause)));
+  }, [user?.role]);
 
   /* ---------- Sugerencias mientras se escribe ---------- */
   const entry = useMemo(() => parseEntry(query), [query]);
@@ -233,7 +256,7 @@ export default function SalesPage() {
       case "Delete":
         if (!query && selectedId !== null) {
           event.preventDefault();
-          removeLine(selectedId);
+          requestRemove(selectedId);
         }
         break;
     }
@@ -250,18 +273,56 @@ export default function SalesPage() {
     focusMainSoon();
   }
 
-  function changeQuantity(productId: number, quantityMilli: number) {
-    if (quantityMilli <= 0) {
+  function requestEdit(productId: number) {
+    if (!canManageCart) return;
+    const line = cartRef.current.find((item) => item.product.id === productId);
+    if (!line) return;
+    setAdminAction({ kind: "edit", productId });
+    setAdminQuantityText((line.quantityMilli / 1000).toString());
+    setAdminDiscountText(String(line.discountPercent));
+    if (user?.role === "cashier") setAdminPassword("");
+    setAdminActionError("");
+  }
+
+  function requestRemove(productId: number) {
+    if (!canManageCart) return;
+    if (!cartRef.current.some((line) => line.product.id === productId)) return;
+    if (user?.role === "admin") {
       removeLine(productId);
       return;
     }
-    const result = setLineQuantity(cartRef.current, productId, quantityMilli);
-    commitCart(result.cart);
-    setError(result.error ?? "");
+    setAdminAction({ kind: "remove", productId });
+    setAdminPassword("");
+    setAdminActionError("");
   }
 
-  function changeDiscount(productId: number, percent: number) {
-    commitCart(setLineDiscount(cartRef.current, productId, percent));
+  async function confirmAdminAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!adminAction) return;
+    setAdminActionSaving(true);
+    setAdminActionError("");
+    try {
+      if (user?.role === "cashier") await authorizeAdminAction(adminUsername, adminPassword);
+      if (adminAction.kind === "remove") {
+        removeLine(adminAction.productId);
+      } else {
+        const quantityMilli = parseQuantityInput(adminQuantityText);
+        if (quantityMilli === null) { setAdminActionError("Ingresa una cantidad mayor que cero."); return; }
+        const result = setLineQuantity(cartRef.current, adminAction.productId, quantityMilli);
+        if (result.error) { setAdminActionError(result.error); return; }
+        const discountPercent = Number(adminDiscountText.replace(",", "."));
+        if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+          setAdminActionError("El descuento debe estar entre 0 y 100%.");
+          return;
+        }
+        commitCart(setLineDiscount(result.cart, adminAction.productId, discountPercent));
+      }
+      setAdminAction(null);
+      setAdminPassword("");
+      focusMainSoon();
+    } catch (cause) {
+      setAdminActionError(messageOf(cause));
+    } finally { setAdminActionSaving(false); }
   }
 
   function clearSale() {
@@ -270,9 +331,35 @@ export default function SalesPage() {
     setLastProduct(null);
     setPaying(false);
     setConfirmClear(false);
+    setClearAuthOpen(false);
     setError("");
     operation.current = null;
     focusMainSoon();
+  }
+
+  function requestClearSale() {
+    setConfirmClear(false);
+    if (user?.role === "admin") {
+      clearSale();
+      return;
+    }
+    setAdminPassword("");
+    setAdminActionError("");
+    setClearAuthOpen(true);
+  }
+
+  async function confirmAuthorizedClear(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAdminActionSaving(true);
+    setAdminActionError("");
+    try {
+      await authorizeAdminAction(adminUsername, adminPassword);
+      clearSale();
+    } catch (cause) {
+      setAdminActionError(messageOf(cause));
+    } finally {
+      setAdminActionSaving(false);
+    }
   }
 
   /* ---------- Cobro ---------- */
@@ -296,7 +383,7 @@ export default function SalesPage() {
     setPaying(true);
   }, [cash, cashLoaded, focusMain, navigate, taxRateBasisPoints]);
 
-  async function completeCharge(method: PaymentMethod, receivedCents: number) {
+  async function completeCharge(method: PaymentMethod, receivedCents: number, customerId?: number) {
     const lines = cartRef.current;
     if (lines.length === 0 || saving) return;
     setSaving(true);
@@ -306,6 +393,7 @@ export default function SalesPage() {
       discountCents: totals.discountCents,
       paymentMethod: method,
       receivedCents,
+      customerId,
     };
     // El mismo operationId solo se reutiliza al reintentar exactamente la misma venta.
     const fingerprint = JSON.stringify(payload);
@@ -334,8 +422,12 @@ export default function SalesPage() {
   /* ---------- Atajos globales: F1 cancelar · F2 cantidad · F3 descuento · F4 buscar · F12 cobrar ---------- */
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (paying || confirmClear) return; // los diálogos manejan sus propias teclas
+      if (paying || confirmClear || clearAuthOpen || adminAction) return; // los diálogos manejan sus propias teclas
+      if (withdrawalOpen) return;
       switch (event.key) {
+        case "F8":
+          if (user?.role === "admin" || user?.role === "cashier") { event.preventDefault(); setWithdrawalOpen(true); }
+          break;
         case "F1":
           event.preventDefault();
           if (cartRef.current.length > 0) setConfirmClear(true);
@@ -350,9 +442,16 @@ export default function SalesPage() {
           const id = selectedId ?? cartRef.current.at(-1)?.product.id;
           if (id === undefined) break;
           setSelectedId(id);
-          const input = document.querySelector<HTMLInputElement>(`[data-discount-input="${id}"]`);
-          input?.focus();
-          input?.select();
+          if (canManageCart) {
+            const line = cartRef.current.find((item) => item.product.id === id);
+            if (line) {
+              setAdminAction({ kind: "edit", productId: id });
+              setAdminQuantityText((line.quantityMilli / 1000).toString());
+              setAdminDiscountText(String(line.discountPercent));
+              setAdminPassword("");
+              setAdminActionError("");
+            }
+          }
           break;
         }
         case "F4":
@@ -368,11 +467,11 @@ export default function SalesPage() {
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [beginCharge, confirmClear, focusMain, paying, selectedId]);
+  }, [adminAction, beginCharge, canManageCart, clearAuthOpen, confirmClear, focusMain, paying, selectedId, user?.role, withdrawalOpen]);
 
   /** Un clic en una zona vacía devuelve el foco al campo principal. */
   function handleWorkspaceClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (paying || confirmClear) return;
+    if (paying || confirmClear || clearAuthOpen || adminAction) return;
     if ((event.target as HTMLElement).closest("input, textarea, select, a, [role='option']")) return;
     focusMain();
   }
@@ -383,6 +482,7 @@ export default function SalesPage() {
       <div className="min-h-0 flex-1 overflow-hidden" onClick={handleWorkspaceClick}>
         <div className="grid min-h-full grid-cols-1 gap-3 p-3 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,2.1fr)_minmax(340px,1fr)] lg:gap-4 lg:p-4">
           <section className="flex min-h-[460px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
+            {(user?.role === "admin" || user?.role === "cashier") && <div className="flex shrink-0 justify-end border-b border-slate-100 px-3 py-2"><button type="button" onClick={() => setWithdrawalOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100"><Banknote size={16}/> Retiro de caja <kbd className="rounded bg-white px-1.5 py-0.5 text-[10px]">F8</kbd></button></div>}
             {(error || receipt || (cashLoaded && !cash)) && (
               <div className="shrink-0 space-y-2 border-b border-slate-100 p-3">
                 {error && (
@@ -408,7 +508,7 @@ export default function SalesPage() {
                       <CheckCircle2 size={22} className="shrink-0" />
                       <div>
                         <strong className="text-sm">Venta completada · {receipt.folio}</strong>
-                        <p className="text-xs text-emerald-800">Total {money(receipt.totalCents)}</p>
+                        <p className="text-xs text-emerald-800">Total {money(receipt.totalCents)}{receipt.paymentMethod === "credit" && receipt.customerName ? ` · Cuenta de ${receipt.customerName}${receipt.dueAt ? ` · vence ${new Date(`${receipt.dueAt.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX")}` : ""}` : ""}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -429,13 +529,12 @@ export default function SalesPage() {
 
             <CartTable
               lines={cart}
+              canManageActions={canManageCart}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onQuantityChange={changeQuantity}
-              onDiscountChange={changeDiscount}
-              onRemove={removeLine}
+              onEdit={requestEdit}
+              onRemove={requestRemove}
               onClear={() => setConfirmClear(true)}
-              onDone={focusMainSoon}
             />
 
             <QuickEntryBar
@@ -465,12 +564,13 @@ export default function SalesPage() {
         </div>
       </div>
 
+      {withdrawalOpen && <CashWithdrawalDialog onClose={() => { setWithdrawalOpen(false); focusMainSoon(); }} onSaved={() => { void getOpenCashSession().then(setCash).catch(() => undefined); }} />}
       {paying && (
         <PaymentDialog
           totalCents={totals.totalCents}
           saving={saving}
           error={payError}
-          onConfirm={(method, receivedCents) => void completeCharge(method, receivedCents)}
+          onConfirm={(method, receivedCents, customerId) => void completeCharge(method, receivedCents, customerId)}
           onCancel={() => {
             setPaying(false);
             focusMainSoon();
@@ -482,13 +582,48 @@ export default function SalesPage() {
           title="¿Cancelar la venta actual?"
           message="Se quitarán todos los artículos del carrito. Esta acción no se puede deshacer."
           confirmLabel="Sí, cancelar venta"
-          onConfirm={clearSale}
+          onConfirm={requestClearSale}
           onCancel={() => {
             setConfirmClear(false);
             focusMainSoon();
           }}
         />
       )}
+      {clearAuthOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="clear-auth-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Autorización requerida</p>
+            <h2 id="clear-auth-title" className="mt-1 text-xl font-bold text-slate-900">Cancelar toda la venta</h2>
+            <p className="mt-2 text-sm text-slate-600">Un administrador debe autorizar la eliminación de todos los artículos del carrito.</p>
+            <form onSubmit={(event) => void confirmAuthorizedClear(event)} className="mt-5 grid gap-4">
+              <label className="text-sm font-medium text-slate-700">Usuario administrador<select autoFocus className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base outline-none focus:border-blue-500" value={adminUsername} onChange={(event) => setAdminUsername(event.target.value)} required><option value="">Selecciona un administrador</option>{adminOptions.map((admin) => <option key={admin.username} value={admin.username}>{admin.displayName} ({admin.username})</option>)}</select></label>
+              <label className="text-sm font-medium text-slate-700">Contraseña del administrador<input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base outline-none focus:border-blue-500" type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} required /></label>
+              {adminActionError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{adminActionError}</p>}
+              <div className="flex justify-end gap-2"><button type="button" disabled={adminActionSaving} onClick={() => setClearAuthOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold">Volver</button><button type="submit" disabled={adminActionSaving || adminOptions.length === 0} className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{adminActionSaving ? "Validando…" : "Autorizar y cancelar"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+      {adminAction && (() => {
+        const line = cart.find((item) => item.product.id === adminAction.productId);
+        if (!line) return null;
+        const editing = adminAction.kind === "edit";
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !adminActionSaving) setAdminAction(null); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="admin-action-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Autorización requerida</p>
+              <h2 id="admin-action-title" className="mt-1 text-xl font-bold text-slate-900">{editing ? "Editar cantidad" : "Eliminar de la venta"}</h2>
+              <p className="mt-2 text-sm text-slate-600"><strong>{line.product.name}</strong>{editing ? " · captura la cantidad que se va a vender." : " · se quitará del carrito actual."}</p>
+              <form onSubmit={(event) => void confirmAdminAction(event)} className="mt-5 grid gap-4">
+                {editing && <><label className="text-sm font-medium text-slate-700">Cantidad ({line.product.unit === "piece" ? "piezas enteras" : line.product.unit})<input autoFocus className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" type="number" min={line.product.unit === "piece" ? "1" : "0.001"} step={line.product.unit === "piece" ? "1" : "0.001"} value={adminQuantityText} onChange={(event) => setAdminQuantityText(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700">Descuento (%)<input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" type="number" min="0" max="100" step="0.01" value={adminDiscountText} onChange={(event) => setAdminDiscountText(event.target.value)} required /><span className="mt-1 block text-xs font-normal text-slate-500">El descuento se aplica solo a este producto.</span></label></>}
+                {user?.role === "cashier" && <><label className="text-sm font-medium text-slate-700">Usuario administrador<select autoFocus={!editing} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" value={adminUsername} onChange={(event) => setAdminUsername(event.target.value)} required><option value="">Selecciona un administrador</option>{adminOptions.map((admin) => <option key={admin.username} value={admin.username}>{admin.displayName} ({admin.username})</option>)}</select></label><label className="text-sm font-medium text-slate-700">Contraseña del administrador<input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} required /></label></>}
+                {adminActionError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{adminActionError}</p>}
+                <div className="flex justify-end gap-2"><button type="button" disabled={adminActionSaving} onClick={() => { setAdminAction(null); focusMainSoon(); }} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancelar</button><button type="submit" disabled={adminActionSaving || (user?.role === "cashier" && adminOptions.length === 0)} className={`rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 ${editing ? "bg-blue-600 hover:bg-blue-700" : "bg-rose-600 hover:bg-rose-700"}`}>{adminActionSaving ? "Guardando…" : editing ? user?.role === "cashier" ? "Autorizar y guardar" : "Guardar cambios" : "Autorizar y eliminar"}</button></div>
+              </form>
+            </section>
+          </div>
+        );
+      })()}
     </div>
   );
 }

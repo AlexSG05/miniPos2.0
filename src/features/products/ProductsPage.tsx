@@ -120,16 +120,6 @@ export default function ProductsPage() {
     }
   }
 
-  async function showMovements() {
-    setError("");
-    try {
-      setMovements(await listInventoryMovements());
-      setModal("movements");
-    } catch (cause) {
-      setError(String(cause));
-    }
-  }
-
   async function toggleProduct(product: Product) {
     const nextActive = !product.active;
     if (!window.confirm(nextActive ? `¿Reactivar ${product.name}?` : `¿Archivar ${product.name}?`)) return;
@@ -138,6 +128,14 @@ export default function ProductsPage() {
       await setProductActive(product.id, nextActive);
       await loadData();
       setSuccess(nextActive ? "Producto reactivado." : "Producto archivado.");
+    } catch (cause) { setError(String(cause)); }
+  }
+
+  async function showMovements() {
+    setError("");
+    try {
+      setMovements(await listInventoryMovements());
+      setModal("movements");
     } catch (cause) {
       setError(String(cause));
     }
@@ -200,6 +198,7 @@ export default function ProductsPage() {
       </section>
 
       {productModal !== undefined && <ProductModal categories={categories} product={productModal} saving={saving} onClose={() => { if (!saving) setProductModal(undefined); }} onSave={saveProduct} />}
+
 
       {modal === "category" && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModal(null); }}><section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Inventario</p><h2 className="mt-1 text-xl font-bold">Nuevo departamento</h2></div><button type="button" onClick={() => setModal(null)} aria-label="Cerrar" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={19} /></button></div><form onSubmit={(event) => void saveCategory(event)} className="mt-5"><label className="text-sm font-medium text-slate-700">Nombre del departamento<input autoFocus className={inputClass + " mt-1"} value={categoryName} onChange={(event) => setCategoryName(event.target.value)} maxLength={80} required /></label><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setModal(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button><button disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Guardando…" : "Guardar"}</button></div></form></section></div>}
 

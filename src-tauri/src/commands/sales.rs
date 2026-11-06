@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tauri::State;
 
-use crate::commands::auth::{require_role, AuthState};
+use crate::commands::auth::{authorize_supervisor, require_role, AuthState};
 use crate::infrastructure::database::Database;
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,8 @@ pub struct SaleRequest {
     pub discount_cents: i64,
     pub payment_method: String,
     pub received_cents: i64,
+    #[serde(default)]
+    pub customer_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +32,10 @@ pub struct VoidSaleRequest {
     pub operation_id: String,
     pub folio: String,
     pub reason: String,
+    #[serde(default)]
+    pub supervisor_username: Option<String>,
+    #[serde(default)]
+    pub supervisor_password: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -55,6 +61,9 @@ pub struct SaleReceipt {
     pub received_cents: i64,
     pub change_cents: i64,
     pub created_at: String,
+    pub cashier_name: String,
+    pub customer_name: Option<String>,
+    pub due_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -83,6 +92,7 @@ pub struct SaleHistoryRow {
     pub total_cents: i64,
     pub payment_methods: String,
     pub status: String,
+    pub cashier_name: String,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -121,12 +131,13 @@ pub struct DailySalesReport {
 
 #[tauri::command]
 pub async fn list_recent_sales(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String) -> Result<Vec<SaleHistoryRow>, String> {
-    require_role(&auth, &session_token, &["admin", "cashier"])?;
+    require_role(&auth, &session_token, &["admin", "cashier", "inventory"])?;
     sqlx::query_as::<_, SaleHistoryRow>(
-        "SELECT s.folio, s.created_at, s.total_cents, s.status,
-                COALESCE((SELECT group_concat(method, ', ') FROM
-                    (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') AS payment_methods
-         FROM sales s ORDER BY s.id DESC LIMIT 100"
+        "SELECT s.folio, s.created_at, s.total_cents, s.status, COALESCE(u.display_name, 'Sin asignar') AS cashier_name,
+                CASE WHEN EXISTS(SELECT 1 FROM credit_sales WHERE sale_id = s.id) THEN 'credit'
+                     ELSE COALESCE((SELECT group_concat(method, ', ') FROM
+                    (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') END AS payment_methods
+         FROM sales s LEFT JOIN users u ON u.id = s.user_id ORDER BY s.id DESC LIMIT 100"
     ).fetch_all(&db.0).await.map_err(|error| {
         eprintln!("Error consultando historial de ventas: {error}");
         "No fue posible consultar el historial de ventas.".to_string()
@@ -134,20 +145,50 @@ pub async fn list_recent_sales(db: State<'_, Database>, auth: State<'_, AuthStat
 }
 
 #[tauri::command]
+pub async fn list_sales_by_day(
+    db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String,
+    date: String, search: String, exact_amount_cents: Option<i64>,
+) -> Result<Vec<SaleHistoryRow>, String> {
+    require_role(&auth, &session_token, &["admin", "cashier", "inventory"])?;
+    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").map_err(|_| "La fecha seleccionada no es válida.".to_string())?;
+    if exact_amount_cents.is_some_and(|amount| amount < 0) { return Err("El monto no puede ser negativo.".into()); }
+    let search = search.trim();
+    if search.chars().count() > 100 { return Err("La búsqueda es demasiado larga.".into()); }
+    sqlx::query_as::<_, SaleHistoryRow>(
+        "SELECT s.folio, s.created_at, s.total_cents, s.status, COALESCE(u.display_name, 'Sin asignar') AS cashier_name,
+                CASE WHEN EXISTS(SELECT 1 FROM credit_sales WHERE sale_id = s.id) THEN 'credit'
+                     ELSE COALESCE((SELECT group_concat(method, ', ') FROM (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') END AS payment_methods
+         FROM sales s LEFT JOIN users u ON u.id = s.user_id
+         WHERE date(s.created_at, '-6 hours') = ?
+           AND (? = '' OR s.folio LIKE '%' || ? || '%' OR COALESCE(u.display_name, '') LIKE '%' || ? || '%' OR COALESCE(u.username, '') LIKE '%' || ? || '%')
+           AND (? IS NULL OR s.total_cents = ?)
+         ORDER BY s.id DESC LIMIT 5000"
+    ).bind(date.trim()).bind(search).bind(search).bind(search).bind(search).bind(exact_amount_cents).bind(exact_amount_cents)
+        .fetch_all(&db.0).await.map_err(|error| {
+            eprintln!("Error consultando ventas del día: {error}");
+            "No fue posible consultar las ventas del día.".to_string()
+        })
+}
+
+#[tauri::command]
 pub async fn get_sale_receipt(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, folio: String) -> Result<SaleReceiptDetails, String> {
-    require_role(&auth, &session_token, &["admin", "cashier"])?;
+    require_role(&auth, &session_token, &["admin", "cashier", "inventory"])?;
     let folio = folio.trim();
     if folio.is_empty() || folio.len() > 80 {
         return Err("El folio indicado no es válido.".into());
     }
     let receipt = sqlx::query_as::<_, SaleReceipt>(
         "SELECT s.folio, s.subtotal_cents, s.discount_cents, s.tax_cents, s.total_cents,
-                COALESCE((SELECT group_concat(method, ', ') FROM
-                    (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') AS payment_method,
+                CASE WHEN EXISTS(SELECT 1 FROM credit_sales WHERE sale_id = s.id) THEN 'credit'
+                     ELSE COALESCE((SELECT group_concat(method, ', ') FROM
+                    (SELECT DISTINCT method FROM sale_payments WHERE sale_id = s.id)), '') END AS payment_method,
                 COALESCE((SELECT SUM(received_cents) FROM sale_payments WHERE sale_id = s.id), 0) AS received_cents,
                 COALESCE((SELECT SUM(change_cents) FROM sale_payments WHERE sale_id = s.id), 0) AS change_cents,
-                s.created_at
-         FROM sales s WHERE s.folio = ?"
+                s.created_at, COALESCE(u.display_name, 'Sin asignar') AS cashier_name,
+                c.name AS customer_name, cs.due_at
+         FROM sales s LEFT JOIN users u ON u.id = s.user_id
+         LEFT JOIN credit_sales cs ON cs.sale_id = s.id
+         LEFT JOIN customers c ON c.id = cs.customer_id WHERE s.folio = ?"
     ).bind(folio).fetch_optional(&db.0).await
         .map_err(|_| "No fue posible recuperar el comprobante.".to_string())?
         .ok_or_else(|| "No se encontró una venta con ese folio.".to_string())?;
@@ -208,16 +249,20 @@ pub async fn get_sales_report(db: State<'_, Database>, auth: State<'_, AuthState
 
 async fn receipt_by_operation(db: &sqlx::SqlitePool, operation_id: &str) -> Result<Option<SaleReceipt>, String> {
     sqlx::query_as::<_, SaleReceipt>(
-        "SELECT s.folio, s.subtotal_cents, s.discount_cents, s.tax_cents, s.total_cents, p.method AS payment_method,
-                p.received_cents, p.change_cents, s.created_at
-         FROM sales s JOIN sale_payments p ON p.sale_id = s.id
+        "SELECT s.folio, s.subtotal_cents, s.discount_cents, s.tax_cents, s.total_cents,
+                COALESCE(p.method, 'credit') AS payment_method,
+                COALESCE(p.received_cents, 0) AS received_cents, COALESCE(p.change_cents, 0) AS change_cents,
+                s.created_at, COALESCE(u.display_name, 'Sin asignar') AS cashier_name,
+                c.name AS customer_name, cs.due_at
+         FROM sales s LEFT JOIN sale_payments p ON p.sale_id = s.id LEFT JOIN users u ON u.id = s.user_id
+         LEFT JOIN credit_sales cs ON cs.sale_id = s.id LEFT JOIN customers c ON c.id = cs.customer_id
          WHERE s.operation_id = ? AND s.status = 'completed' LIMIT 1"
     ).bind(operation_id).fetch_optional(db).await.map_err(|_| "No fue posible recuperar la venta registrada.".into())
 }
 
 #[tauri::command]
 pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, request: SaleRequest) -> Result<SaleReceipt, String> {
-    require_role(&auth, &session_token, &["admin", "cashier"])?;
+    let cashier = require_role(&auth, &session_token, &["admin", "cashier", "inventory"])?;
     let operation_id = request.operation_id.trim();
     if operation_id.is_empty() || operation_id.len() > 100 {
         return Err("El identificador de venta no es válido.".into());
@@ -226,10 +271,13 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
     if request.items.is_empty() || request.items.len() > 100 {
         return Err("Agrega al menos un producto a la venta.".into());
     }
-    if !matches!(request.payment_method.as_str(), "cash" | "card") {
+    if !matches!(request.payment_method.as_str(), "cash" | "card" | "credit") {
         return Err("El método de pago no es válido.".into());
     }
 
+    if (request.payment_method == "credit") != request.customer_id.is_some() {
+        return Err("Selecciona un cliente únicamente para ventas a crédito.".into());
+    }
     let mut tx = db.0.begin().await.map_err(|_| "No fue posible iniciar la venta.".to_string())?;
     let session_id: Option<i64> = sqlx::query_scalar("SELECT id FROM cash_sessions WHERE closed_at IS NULL")
         .fetch_optional(&mut *tx).await.map_err(|_| "No fue posible verificar el estado de caja.".to_string())?;
@@ -269,6 +317,26 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
     let tax = i64::try_from((tax_calc + 5000) / 10000)
         .map_err(|_| "El impuesto excede el límite permitido.".to_string())?;
     let total = subtotal.checked_add(tax).ok_or_else(|| "El total excede el límite permitido.".to_string())?;
+    let mut credit_terms: Option<(i64, i64)> = None;
+    if request.payment_method == "credit" {
+        if total <= 0 { return Err("No se puede registrar a crédito una venta sin importe.".into()); }
+        let customer_id = request.customer_id.unwrap();
+        let customer = sqlx::query_as::<_, (i64, i64, i64, String)>(
+            "SELECT credit_limit_cents, balance_cents, credit_days, account_status FROM customers WHERE id = ?"
+        ).bind(customer_id).fetch_optional(&mut *tx).await
+            .map_err(|_| "No fue posible validar la cuenta del cliente.".to_string())?
+            .ok_or_else(|| "El cliente seleccionado no existe.".to_string())?;
+        if customer.3 != "active" { return Err("La cuenta del cliente está bloqueada.".into()); }
+        let overdue: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM credit_sales WHERE customer_id = ? AND status = 'open' AND balance_due_cents > 0 AND date(due_at) < date('now', '-6 hours'))"
+        ).bind(customer_id).fetch_one(&mut *tx).await
+            .map_err(|_| "No fue posible revisar vencimientos del cliente.".to_string())?;
+        if overdue { return Err("El cliente tiene saldo vencido y no puede comprar a crédito.".into()); }
+        if customer.0 <= 0 || customer.1.checked_add(total).is_none_or(|balance| balance > customer.0) {
+            return Err("La venta supera el límite de crédito disponible del cliente.".into());
+        }
+        credit_terms = Some((customer_id, customer.2));
+    }
     if request.payment_method == "cash" && request.received_cents < total {
         return Err("El efectivo recibido es menor que el total.".into());
     }
@@ -278,9 +346,9 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
     let change = if request.payment_method == "cash" { request.received_cents - total } else { 0 };
 
     let inserted = sqlx::query(
-        "INSERT INTO sales (operation_id, folio, session_id, subtotal_cents, discount_cents, tax_cents, total_cents, status)
-         VALUES (?, 'pending', ?, ?, ?, ?, ?, 'completed')"
-    ).bind(operation_id).bind(session_id).bind(subtotal).bind(request.discount_cents).bind(tax).bind(total)
+        "INSERT INTO sales (operation_id, folio, session_id, subtotal_cents, discount_cents, tax_cents, total_cents, status, user_id)
+         VALUES (?, 'pending', ?, ?, ?, ?, ?, 'completed', ?)"
+    ).bind(operation_id).bind(session_id).bind(subtotal).bind(request.discount_cents).bind(tax).bind(total).bind(cashier.id)
         .execute(&mut *tx).await.map_err(|error| {
             eprintln!("Error guardando venta: {error}");
             "No fue posible registrar la venta.".to_string()
@@ -316,24 +384,50 @@ pub async fn complete_sale(db: State<'_, Database>, auth: State<'_, AuthState>, 
             .bind(previous_stock).bind(new_stock).bind(format!("Venta {folio}")).bind(&folio)
             .execute(&mut *tx).await.map_err(|_| "No fue posible registrar la salida de inventario.".to_string())?;
     }
-    sqlx::query("INSERT INTO sale_payments (sale_id, method, amount_cents, received_cents, change_cents) VALUES (?, ?, ?, ?, ?)")
-        .bind(sale_id).bind(&request.payment_method).bind(total).bind(request.received_cents).bind(change)
-        .execute(&mut *tx).await.map_err(|_| "No fue posible guardar el pago.".to_string())?;
+    if let Some((customer_id, credit_days)) = credit_terms {
+        sqlx::query(
+            "INSERT INTO credit_sales (sale_id, customer_id, original_amount_cents, balance_due_cents, credit_days, due_at)
+             VALUES (?, ?, ?, ?, ?, date('now', '-6 hours', '+' || ? || ' days'))",
+        ).bind(sale_id).bind(customer_id).bind(total).bind(total).bind(credit_days).bind(credit_days)
+            .execute(&mut *tx).await.map_err(|_| "No fue posible registrar la cuenta por cobrar.".to_string())?;
+        sqlx::query("UPDATE customers SET balance_cents = balance_cents + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
+            .bind(total).bind(customer_id).execute(&mut *tx).await
+            .map_err(|_| "No fue posible actualizar el saldo del cliente.".to_string())?;
+    } else {
+        sqlx::query("INSERT INTO sale_payments (sale_id, method, amount_cents, received_cents, change_cents) VALUES (?, ?, ?, ?, ?)")
+            .bind(sale_id).bind(&request.payment_method).bind(total).bind(request.received_cents).bind(change)
+            .execute(&mut *tx).await.map_err(|_| "No fue posible guardar el pago.".to_string())?;
+    }
     tx.commit().await.map_err(|_| "No fue posible confirmar la venta.".to_string())?;
     receipt_by_operation(&db.0, operation_id).await?.ok_or_else(|| "La venta se registró, pero no fue posible recuperar el comprobante.".into())
 }
 
 async fn refund_by_operation(db: &sqlx::SqlitePool, operation_id: &str) -> Result<Option<RefundReceipt>, String> {
-    sqlx::query_as::<_, RefundReceipt>(
+    let refund = sqlx::query_as::<_, RefundReceipt>(
         "SELECT s.folio, r.amount_cents, r.subtotal_cents, r.method, r.reason, r.created_at
          FROM sale_refunds r JOIN sales s ON s.id = r.sale_id WHERE r.operation_id = ?"
     ).bind(operation_id).fetch_optional(db).await
-        .map_err(|_| "No fue posible recuperar el reembolso registrado.".to_string())
+        .map_err(|_| "No fue posible recuperar el reembolso registrado.".to_string())?;
+    if refund.is_some() { return Ok(refund); }
+    sqlx::query_as::<_, RefundReceipt>(
+        "SELECT s.folio, s.total_cents AS amount_cents, s.subtotal_cents, 'credit' AS method,
+                v.reason, v.created_at
+         FROM credit_sale_voids v JOIN credit_sales cs ON cs.id = v.credit_sale_id
+         JOIN sales s ON s.id = cs.sale_id WHERE v.operation_id = ?"
+    ).bind(operation_id).fetch_optional(db).await
+        .map_err(|_| "No fue posible recuperar la cancelación del crédito.".to_string())
 }
 
 #[tauri::command]
 pub async fn void_sale(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, request: VoidSaleRequest) -> Result<RefundReceipt, String> {
-    require_role(&auth, &session_token, &["admin"])?;
+    let actor = require_role(&auth, &session_token, &["admin", "cashier"])?;
+    if actor.role == "cashier" {
+        authorize_supervisor(
+            &db.0,
+            request.supervisor_username.as_deref().unwrap_or_default(),
+            request.supervisor_password.clone().unwrap_or_default(),
+        ).await?;
+    }
     let operation_id = request.operation_id.trim();
     let folio = request.folio.trim();
     let reason = request.reason.trim();
@@ -346,8 +440,11 @@ pub async fn void_sale(db: State<'_, Database>, auth: State<'_, AuthState>, sess
     let session = sqlx::query_as::<_, (i64, i64)>("SELECT id, opening_cents FROM cash_sessions WHERE closed_at IS NULL")
         .fetch_optional(&mut *tx).await.map_err(|_| "No fue posible revisar la caja abierta.".to_string())?
         .ok_or_else(|| "Abre la caja para registrar la devolución.".to_string())?;
-    let sale = sqlx::query_as::<_, (i64, i64, String, i64, i64)>(
-        "SELECT s.id, s.total_cents, p.method, s.subtotal_cents, s.tax_cents FROM sales s JOIN sale_payments p ON p.sale_id = s.id
+    let sale = sqlx::query_as::<_, (i64, i64, String, i64, i64, Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT s.id, s.total_cents, COALESCE(p.method, 'credit'), s.subtotal_cents, s.tax_cents,
+                cs.id, cs.customer_id, cs.balance_due_cents
+         FROM sales s LEFT JOIN sale_payments p ON p.sale_id = s.id
+         LEFT JOIN credit_sales cs ON cs.sale_id = s.id
          WHERE s.folio = ? AND s.status = 'completed' LIMIT 1"
     ).bind(folio).fetch_optional(&mut *tx).await.map_err(|_| "No fue posible consultar la venta.".to_string())?
         .ok_or_else(|| "La venta no existe o ya fue anulada.".to_string())?;
@@ -364,12 +461,34 @@ pub async fn void_sale(db: State<'_, Database>, auth: State<'_, AuthState>, sess
         if sale.1 > available { return Err("No hay efectivo suficiente en la caja para devolver el importe.".into()); }
     }
 
+    if sale.2 == "credit" {
+        let credit_sale_id = sale.5.ok_or_else(|| "No se encontró la cuenta por cobrar de la venta.".to_string())?;
+        let customer_id = sale.6.ok_or_else(|| "No se encontró el cliente de la venta a crédito.".to_string())?;
+        let outstanding = sale.7.unwrap_or(0);
+        let allocated: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(allocated_cents), 0) FROM customer_payment_allocations WHERE credit_sale_id = ?")
+            .bind(credit_sale_id).fetch_one(&mut *tx).await
+            .map_err(|_| "No fue posible revisar los abonos de la venta a crédito.".to_string())?;
+        if allocated > 0 { return Err("Esta venta ya tiene abonos. Registra una nota de crédito antes de anularla.".into()); }
+        let updated_credit = sqlx::query("UPDATE credit_sales SET balance_due_cents = 0, status = 'voided' WHERE id = ? AND status = 'open'")
+            .bind(credit_sale_id).execute(&mut *tx).await
+            .map_err(|_| "No fue posible cancelar el saldo a crédito.".to_string())?;
+        if updated_credit.rows_affected() != 1 { return Err("La cuenta por cobrar ya fue cerrada.".into()); }
+        sqlx::query("UPDATE customers SET balance_cents = MAX(balance_cents - ?, 0), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
+            .bind(outstanding).bind(customer_id).execute(&mut *tx).await
+            .map_err(|_| "No fue posible actualizar el saldo del cliente.".to_string())?;
+        sqlx::query("INSERT INTO credit_sale_voids (operation_id, credit_sale_id, user_id, reason) VALUES (?, ?, ?, ?)")
+            .bind(operation_id).bind(credit_sale_id).bind(actor.id).bind(reason)
+            .execute(&mut *tx).await.map_err(|_| "No fue posible guardar la cancelación de crédito.".to_string())?;
+    }
+
     let changed = sqlx::query("UPDATE sales SET status = 'voided' WHERE id = ? AND status = 'completed'")
         .bind(sale.0).execute(&mut *tx).await.map_err(|_| "No fue posible anular la venta.".to_string())?;
     if changed.rows_affected() != 1 { return Err("La venta ya fue anulada.".into()); }
-    sqlx::query("INSERT INTO sale_refunds (operation_id, sale_id, session_id, amount_cents, subtotal_cents, tax_cents, method, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(operation_id).bind(sale.0).bind(session.0).bind(sale.1).bind(sale.3).bind(sale.4).bind(&sale.2).bind(reason)
-        .execute(&mut *tx).await.map_err(|_| "No fue posible registrar el reembolso.".to_string())?;
+    if sale.2 != "credit" {
+        sqlx::query("INSERT INTO sale_refunds (operation_id, sale_id, session_id, amount_cents, subtotal_cents, tax_cents, method, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(operation_id).bind(sale.0).bind(session.0).bind(sale.1).bind(sale.3).bind(sale.4).bind(&sale.2).bind(reason)
+            .execute(&mut *tx).await.map_err(|_| "No fue posible registrar el reembolso.".to_string())?;
+    }
 
     let items = sqlx::query_as::<_, (i64, f64)>("SELECT product_id, quantity FROM sale_items WHERE sale_id = ?")
         .bind(sale.0).fetch_all(&mut *tx).await.map_err(|_| "No fue posible recuperar los productos de la venta.".to_string())?;

@@ -85,3 +85,28 @@ table tbody tr:hover { background-color: #f8fafc; }
 .auth-panel > button:disabled { opacity: .6; cursor: wait; }
 .auth-loading { display: grid; min-height: 100vh; place-items: center; background: #f8fafc; color: #475569; font-size: 14px; }
 @media (max-width: 640px) { .auth-panel { padding: 26px 22px; } }
+
+@media print {
+  @page { margin: 12mm; }
+  body * { visibility: hidden !important; }
+  .sale-ticket-print, .sale-ticket-print * { visibility: visible !important; }
+  .sale-ticket-print {
+    position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important;
+    max-height: none !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; background: white !important; color: black !important;
+  }
+  #cash-closure-report, #cash-closure-report * { visibility: visible !important; }
+  #cash-closure-report {
+    display: block !important; position: fixed !important; inset: 0 !important; width: 100% !important;
+    max-height: none !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; background: white !important; color: black !important;
+  }
+  #cash-closure-report .no-print { display: none !important; }
+  #credit-payment-receipt, #credit-payment-receipt * { visibility: visible !important; }
+  #credit-payment-receipt {
+    display: block !important; position: fixed !important; inset: 0 !important; width: 100% !important;
+    max-height: none !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; background: white !important; color: black !important;
+  }
+  #credit-payment-receipt .no-print { display: none !important; }
+}

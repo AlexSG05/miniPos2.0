@@ -4,3 +4,5 @@ pub mod sales;
 pub mod settings;
 pub mod categories;
 pub mod auth;
+pub mod purchases;
+pub mod customers;

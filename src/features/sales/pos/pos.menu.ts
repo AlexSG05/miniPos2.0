@@ -25,6 +25,8 @@ export type PosMenuItem = { to: string; label: string; hint: string; icon: Lucid
 const COPY: Record<string, { label: string; hint: string }> = {
   "/": { label: "Resumen", hint: "Vista general del negocio" },
   "/productos": { label: "Catálogos", hint: "Productos, precios e inventario" },
+  "/compras": { label: "Compras", hint: "Proveedores y recepción de mercancía" },
+  "/clientes": { label: "Clientes / Fiado", hint: "Saldos, vencimientos y abonos" },
   "/caja": { label: "Turno", hint: "Apertura, cierre y movimientos de caja" },
   "/reportes": { label: "Consultas e informes", hint: "Ventas, devoluciones y reportes" },
   "/usuarios": { label: "Usuarios", hint: "Cajeros y permisos" },

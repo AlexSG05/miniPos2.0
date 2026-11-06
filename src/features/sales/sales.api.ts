@@ -8,14 +8,17 @@ export type SaleReceipt = {
   discountCents: number;
   taxCents: number;
   totalCents: number;
-  paymentMethod: "cash" | "card";
+  paymentMethod: "cash" | "card" | "credit";
   receivedCents: number;
   changeCents: number;
   createdAt: string;
+  cashierName: string;
+  customerName: string | null;
+  dueAt: string | null;
 };
 
-export type SaleHistoryRow = { folio: string; createdAt: string; totalCents: number; paymentMethods: string; status: "completed" | "voided" };
-export type RefundReceipt = { folio: string; amountCents: number; subtotalCents: number; method: "cash" | "card"; reason: string; createdAt: string };
+export type SaleHistoryRow = { folio: string; createdAt: string; totalCents: number; paymentMethods: string; status: "completed" | "voided"; cashierName: string };
+export type RefundReceipt = { folio: string; amountCents: number; subtotalCents: number; method: "cash" | "card" | "credit"; reason: string; createdAt: string };
 export type SaleReceiptDetails = {
   receipt: SaleReceipt;
   items: { productName: string; internalCode: string; quantity: number; unitPriceCents: number; lineTotalCents: number }[];
@@ -44,18 +47,23 @@ export function completeSale(request: {
   operationId: string;
   items: SaleItemRequest[];
   discountCents: number;
-  paymentMethod: "cash" | "card";
+  paymentMethod: "cash" | "card" | "credit";
   receivedCents: number;
+  customerId?: number;
 }) {
   return invokeAuthed<SaleReceipt>("complete_sale", { request });
 }
 
-export function voidSale(request: { operationId: string; folio: string; reason: string }) {
+export function voidSale(request: { operationId: string; folio: string; reason: string; supervisorUsername?: string; supervisorPassword?: string }) {
   return invokeAuthed<RefundReceipt>("void_sale", { request });
 }
 
 export function listRecentSales() {
   return invokeAuthed<SaleHistoryRow[]>("list_recent_sales");
+}
+
+export function listSalesByDay(date: string, search = "", exactAmountCents?: number) {
+  return invokeAuthed<SaleHistoryRow[]>("list_sales_by_day", { date, search, exactAmountCents: exactAmountCents ?? null });
 }
 
 export function getSaleReceipt(folio: string) {

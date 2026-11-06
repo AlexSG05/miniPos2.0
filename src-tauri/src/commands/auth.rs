@@ -20,6 +20,8 @@ pub struct UserInfo {
     pub role: String,
     pub active: bool,
     pub created_at: String,
+    pub phone: String,
+    pub hire_date: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -54,20 +56,40 @@ fn validate_credentials(username: &str, display_name: &str, password: &str) -> R
     if display_name.trim().is_empty() || display_name.trim().chars().count() > 120 {
         return Err("El nombre debe tener entre 1 y 120 caracteres.".into());
     }
-    if password.chars().count() < 10 || password.chars().count() > 128 {
-        return Err("La contraseña debe tener entre 10 y 128 caracteres.".into());
+    if password.chars().count() < 4 || password.chars().count() > 128 {
+        return Err("La contraseña debe tener entre 4 y 128 caracteres.".into());
     }
     Ok(())
 }
 
+fn validate_employee_details(phone: &str, hire_date: &str) -> Result<(), String> {
+    if phone.chars().count() > 30 || phone.chars().any(|c| !(c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')'))) {
+        return Err("El teléfono solo puede contener números, espacios y los símbolos +, -, ( ).".into());
+    }
+    let bytes = hire_date.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-'
+        || !bytes.iter().enumerate().all(|(i, byte)| i == 4 || i == 7 || byte.is_ascii_digit())
+    {
+        return Err("La fecha de ingreso debe tener el formato AAAA-MM-DD.".into());
+    }
+    let year: u32 = hire_date[0..4].parse().unwrap_or(0);
+    let month: u32 = hire_date[5..7].parse().unwrap_or(0);
+    let day: u32 = hire_date[8..10].parse().unwrap_or(0);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month { 1 | 3 | 5 | 7 | 8 | 10 | 12 => 31, 4 | 6 | 9 | 11 => 30, 2 if leap => 29, 2 => 28, _ => 0 };
+    if year == 0 || day == 0 || day > days_in_month { return Err("La fecha de ingreso no es válida.".into()); }
+    Ok(())
+}
+
 fn derive_password(password: &str, salt: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC acepta cualquier longitud de clave");
+    let key_state = HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC acepta cualquier longitud de clave");
+    let mut mac = key_state.clone();
     mac.update(salt);
     mac.update(&1u32.to_be_bytes());
     let mut u = mac.finalize().into_bytes().to_vec();
     let mut output = u.clone();
     for _ in 1..HASH_ROUNDS {
-        let mut mac = HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC acepta cualquier longitud de clave");
+        let mut mac = key_state.clone();
         mac.update(&u);
         u = mac.finalize().into_bytes().to_vec();
         for (out, byte) in output.iter_mut().zip(&u) { *out ^= byte; }
@@ -96,6 +118,37 @@ fn password_hash(password: &str) -> String {
     format!("pbkdf2-sha256${}${}${}", HASH_ROUNDS, hex(&salt), hex(&derive_password(password, &salt)))
 }
 
+async fn password_hash_async(password: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || password_hash(&password))
+        .await.map_err(|_| "No fue posible procesar la contraseña.".to_string())
+}
+
+async fn verify_password_async(password: String, encoded: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || verify_password(&password, &encoded))
+        .await.map_err(|_| "No fue posible validar la contraseña.".to_string())
+}
+
+pub async fn authorize_supervisor(
+    db: &sqlx::SqlitePool,
+    username: &str,
+    password: String,
+) -> Result<(), String> {
+    let hash: Option<String> = sqlx::query_scalar(
+        "SELECT password_hash FROM users WHERE username = ? COLLATE NOCASE
+         AND role = 'admin' AND active = 1",
+    )
+    .bind(username.trim())
+    .fetch_optional(db)
+    .await
+    .map_err(|_| "No fue posible validar la cuenta administradora.".to_string())?;
+    if let Some(encoded) = hash {
+        if verify_password_async(password, encoded).await? {
+            return Ok(());
+        }
+    }
+    Err("El usuario administrador o la contraseña son incorrectos.".into())
+}
+
 fn verify_password(password: &str, encoded: &str) -> bool {
     let mut parts = encoded.split('$');
     if parts.next() != Some("pbkdf2-sha256") || parts.next() != Some("210000") { return false; }
@@ -107,6 +160,22 @@ fn verify_password(password: &str, encoded: &str) -> bool {
     actual.iter().zip(expected).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
 }
 
+#[derive(Clone, Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminOption { pub id: i64, pub username: String, pub display_name: String }
+
+#[tauri::command]
+pub async fn list_active_admins(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String) -> Result<Vec<AdminOption>, String> {
+    require_role(&auth, &session_token, &["admin", "inventory", "cashier"])?;
+    sqlx::query_as::<_, AdminOption>("SELECT id, username, display_name FROM users WHERE role = 'admin' AND active = 1 ORDER BY display_name COLLATE NOCASE")
+        .fetch_all(&db.0).await.map_err(|_| "No fue posible consultar las cuentas administradoras.".to_string())
+}
+
+#[tauri::command]
+pub async fn authorize_admin_action(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, admin_username: String, admin_password: String) -> Result<(), String> {
+    require_role(&auth, &session_token, &["admin", "inventory", "cashier"])?;
+    authorize_supervisor(&db.0, &admin_username, admin_password).await
+}
 fn new_token() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
@@ -114,7 +183,7 @@ fn new_token() -> String {
 }
 
 async fn user_by_id(db: &sqlx::SqlitePool, id: i64) -> Result<UserInfo, String> {
-    sqlx::query_as::<_, UserInfo>("SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?")
+    sqlx::query_as::<_, UserInfo>("SELECT id, username, display_name, role, active, created_at, phone, hire_date FROM users WHERE id = ?")
         .bind(id).fetch_one(db).await.map_err(|_| "No fue posible recuperar el usuario.".to_string())
 }
 
@@ -127,11 +196,12 @@ pub async fn auth_status(db: State<'_, Database>) -> Result<bool, String> {
 #[tauri::command]
 pub async fn bootstrap_admin(db: State<'_, Database>, auth: State<'_, AuthState>, username: String, display_name: String, password: String) -> Result<SessionInfo, String> {
     validate_credentials(&username, &display_name, &password)?;
+    let encoded_password = password_hash_async(password).await?;
     let mut tx = db.0.begin().await.map_err(|_| "No fue posible iniciar la configuración de usuarios.".to_string())?;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&mut *tx).await.map_err(|_| "No fue posible revisar los usuarios.".to_string())?;
     if count != 0 { return Err("La configuración inicial ya se completó. Inicia sesión.".into()); }
-    let result = sqlx::query("INSERT INTO users (username, display_name, password_hash, role) VALUES (?, ?, ?, 'admin')")
-        .bind(username.trim()).bind(display_name.trim()).bind(password_hash(&password)).execute(&mut *tx).await
+    let result = sqlx::query("INSERT INTO users (username, display_name, password_hash, role, hire_date) VALUES (?, ?, ?, 'admin', date('now'))")
+        .bind(username.trim()).bind(display_name.trim()).bind(encoded_password).execute(&mut *tx).await
         .map_err(|_| "No fue posible crear el administrador inicial.".to_string())?;
     let id = result.last_insert_rowid();
     tx.commit().await.map_err(|_| "No fue posible guardar el administrador.".to_string())?;
@@ -143,12 +213,12 @@ pub async fn bootstrap_admin(db: State<'_, Database>, auth: State<'_, AuthState>
 
 #[tauri::command]
 pub async fn login(db: State<'_, Database>, auth: State<'_, AuthState>, username: String, password: String) -> Result<SessionInfo, String> {
-    let row: Option<(i64, String, String, String, String, bool, String)> = sqlx::query_as(
-        "SELECT id, username, display_name, role, password_hash, active, created_at FROM users WHERE username = ? COLLATE NOCASE"
+    let row: Option<(i64, String, String, String, String, bool, String, String, String)> = sqlx::query_as(
+        "SELECT id, username, display_name, role, password_hash, active, created_at, phone, hire_date FROM users WHERE username = ? COLLATE NOCASE"
     ).bind(username.trim()).fetch_optional(&db.0).await.map_err(|_| "No fue posible consultar el usuario.".to_string())?;
-    let Some((id, username, display_name, role, hash, active, created_at)) = row else { return Err("Usuario o contraseña incorrectos.".into()); };
-    if !active || !verify_password(&password, &hash) { return Err("Usuario o contraseña incorrectos.".into()); }
-    let user = UserInfo { id, username, display_name, role, active, created_at };
+    let Some((id, username, display_name, role, hash, active, created_at, phone, hire_date)) = row else { return Err("Usuario o contraseña incorrectos.".into()); };
+    if !active || !verify_password_async(password, hash).await? { return Err("Usuario o contraseña incorrectos.".into()); }
+    let user = UserInfo { id, username, display_name, role, active, created_at, phone, hire_date };
     let token = new_token();
     auth.0.lock().map_err(|_| "No fue posible iniciar la sesión.".to_string())?.insert(token.clone(), ActiveSession { user: user.clone() });
     Ok(SessionInfo { token, user })
@@ -168,17 +238,19 @@ pub async fn logout(auth: State<'_, AuthState>, session_token: String) -> Result
 #[tauri::command]
 pub async fn list_users(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String) -> Result<Vec<UserInfo>, String> {
     require_role(&auth, &session_token, &["admin"])?;
-    sqlx::query_as::<_, UserInfo>("SELECT id, username, display_name, role, active, created_at FROM users ORDER BY display_name COLLATE NOCASE")
+    sqlx::query_as::<_, UserInfo>("SELECT id, username, display_name, role, active, created_at, phone, hire_date FROM users ORDER BY display_name COLLATE NOCASE")
         .fetch_all(&db.0).await.map_err(|_| "No fue posible consultar los usuarios.".to_string())
 }
 
 #[tauri::command]
-pub async fn create_user(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, username: String, display_name: String, password: String, role: String) -> Result<UserInfo, String> {
+pub async fn create_user(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, username: String, display_name: String, password: String, role: String, phone: String, hire_date: String) -> Result<UserInfo, String> {
     require_role(&auth, &session_token, &["admin"])?;
     validate_credentials(&username, &display_name, &password)?;
+    validate_employee_details(&phone, &hire_date)?;
     if !matches!(role.as_str(), "admin" | "cashier" | "inventory") { return Err("El rol indicado no es válido.".into()); }
-    let result = sqlx::query("INSERT INTO users (username, display_name, password_hash, role) VALUES (?, ?, ?, ?)")
-        .bind(username.trim()).bind(display_name.trim()).bind(password_hash(&password)).bind(role).execute(&db.0).await
+    let encoded_password = password_hash_async(password).await?;
+    let result = sqlx::query("INSERT INTO users (username, display_name, password_hash, role, phone, hire_date) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(username.trim()).bind(display_name.trim()).bind(encoded_password).bind(role).bind(phone.trim()).bind(&hire_date).execute(&db.0).await
         .map_err(|error| if error.to_string().contains("UNIQUE constraint failed") { "Ese nombre de usuario ya existe.".to_string() } else { "No fue posible crear el usuario.".to_string() })?;
     user_by_id(&db.0, result.last_insert_rowid()).await
 }
@@ -228,9 +300,10 @@ pub async fn set_user_role(db: State<'_, Database>, auth: State<'_, AuthState>, 
 #[tauri::command]
 pub async fn reset_user_password(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, user_id: i64, password: String) -> Result<(), String> {
     require_role(&auth, &session_token, &["admin"])?;
-    if password.chars().count() < 10 || password.chars().count() > 128 { return Err("La contraseña debe tener entre 10 y 128 caracteres.".into()); }
+    if password.chars().count() < 4 || password.chars().count() > 128 { return Err("La contraseña debe tener entre 4 y 128 caracteres.".into()); }
+    let encoded_password = password_hash_async(password).await?;
     let result = sqlx::query("UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1")
-        .bind(password_hash(&password)).bind(user_id).execute(&db.0).await.map_err(|_| "No fue posible actualizar la contraseña.".to_string())?;
+        .bind(encoded_password).bind(user_id).execute(&db.0).await.map_err(|_| "No fue posible actualizar la contraseña.".to_string())?;
     if result.rows_affected() == 0 { return Err("No se encontró un usuario activo.".into()); }
     let mut sessions = auth.0.lock().map_err(|_| "No fue posible invalidar sesiones anteriores.".to_string())?;
     sessions.retain(|_, session| session.user.id != user_id);

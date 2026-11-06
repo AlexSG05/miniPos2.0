@@ -132,7 +132,6 @@ export default function QuickEntryBar({
               aria-controls="pos-suggestions"
               aria-autocomplete="list"
               aria-activedescendant={showSuggestions ? `pos-suggestion-${highlight}` : undefined}
-              placeholder="Escanea el código o escribe el nombre del producto…"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               onKeyDown={onInputKeyDown}

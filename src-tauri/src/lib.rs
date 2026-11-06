@@ -39,6 +39,8 @@ pub fn run() {
             commands::auth::bootstrap_admin,
             commands::auth::login,
             commands::auth::current_user,
+            commands::auth::list_active_admins,
+            commands::auth::authorize_admin_action,
             commands::auth::logout,
             commands::auth::list_users,
             commands::auth::create_user,
@@ -47,12 +49,15 @@ pub fn run() {
             commands::auth::reset_user_password,
             commands::cash::get_open_cash_session,
             commands::cash::list_cash_closures,
+            commands::cash::get_cash_closure,
             commands::cash::open_cash_session,
             commands::cash::close_cash_session,
             commands::cash::record_cash_movement,
+            commands::cash::record_cash_withdrawal,
             commands::sales::complete_sale,
             commands::sales::void_sale,
             commands::sales::list_recent_sales,
+            commands::sales::list_sales_by_day,
             commands::sales::get_sale_receipt,
             commands::sales::get_sales_report,
             commands::settings::get_business_settings,
@@ -65,7 +70,15 @@ pub fn run() {
             commands::products::update_product,
             commands::products::set_product_active,
             commands::products::list_inventory_movements,
-            commands::products::adjust_inventory
+            commands::products::adjust_inventory,
+            commands::purchases::list_suppliers,
+            commands::purchases::create_supplier,
+            commands::purchases::receive_purchase,
+            commands::customers::list_customers,
+            commands::customers::create_customer,
+            commands::customers::update_customer,
+            commands::customers::get_customer_statement,
+            commands::customers::receive_customer_payment
         ])
         .run(tauri::generate_context!())
         .expect("error while running MiniPOS");

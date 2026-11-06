@@ -20,17 +20,18 @@
  * ============================================================================
  */
 import { useEffect, useRef, useState } from "react";
-import { Banknote, CheckCircle2, CreditCard } from "lucide-react";
+import { Banknote, CheckCircle2, CreditCard, UserRound } from "lucide-react";
 import Modal from "./Modal";
 import { amount, cashSuggestions, money } from "./pos.utils";
+import { listCustomers, type Customer } from "../../customers/customers.api";
 
-export type PaymentMethod = "cash" | "card";
+export type PaymentMethod = "cash" | "card" | "credit";
 
 type Props = {
   totalCents: number;
   saving: boolean;
   error: string;
-  onConfirm: (method: PaymentMethod, receivedCents: number) => void;
+  onConfirm: (method: PaymentMethod, receivedCents: number, customerId?: number) => void;
   onCancel: () => void;
 };
 
@@ -39,13 +40,27 @@ const kbd = "rounded border border-current/30 px-1.5 py-0.5 text-[10px] font-bol
 export default function PaymentDialog({ totalCents, saving, error, onConfirm, onCancel }: Props) {
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [received, setReceived] = useState("");
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerId, setCustomerId] = useState("");
+  const [customersError, setCustomersError] = useState("");
+  const [customersLoading, setCustomersLoading] = useState(true);
   const formRef = useRef<HTMLFormElement>(null);
   const receivedRef = useRef<HTMLInputElement>(null);
 
-  const receivedCents = method === "card" ? totalCents : Math.round((Number(received.replace(",", ".")) || 0) * 100);
+  const receivedCents = method === "card" ? totalCents : method === "credit" ? 0 : Math.round((Number(received.replace(",", ".")) || 0) * 100);
   const changeCents = Math.max(0, receivedCents - totalCents);
   const missingCents = Math.max(0, totalCents - receivedCents);
-  const canConfirm = !saving && receivedCents >= totalCents;
+  const canConfirm = method === "credit"
+    ? !saving && !customersLoading && Boolean(customerId) && !customersError
+    : !saving && receivedCents >= totalCents;
+
+  useEffect(() => {
+    let active = true;
+    void listCustomers().then((rows) => { if (active) setCustomers(rows); })
+      .catch((cause) => { if (active) setCustomersError(String(cause)); })
+      .finally(() => { if (active) setCustomersLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   // F12 confirma, F8 efectivo, F9 tarjeta (sin salir del teclado).
   useEffect(() => {
@@ -90,7 +105,7 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
         className="space-y-4 p-5"
         onSubmit={(event) => {
           event.preventDefault();
-          if (canConfirm) onConfirm(method, receivedCents);
+          if (canConfirm) onConfirm(method, receivedCents, method === "credit" ? Number(customerId) : undefined);
         }}
       >
         <div className="rounded-xl bg-slate-950 px-5 py-4 text-right">
@@ -101,12 +116,27 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {methodButton("cash", "Efectivo", "F8", Banknote)}
           {methodButton("card", "Tarjeta", "F9", CreditCard)}
+          {methodButton("credit", "Fiado", "", UserRound)}
         </div>
 
-        {method === "cash" ? (
+        {method === "credit" ? (
+          <div className="space-y-3">
+            <label htmlFor="pos-credit-customer" className="block text-sm font-semibold text-slate-700">Cliente con cuenta de crédito</label>
+            <select id="pos-credit-customer" value={customerId} onChange={(event) => setCustomerId(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white p-3 text-sm text-slate-800" required>
+              <option value="">{customersLoading ? "Cargando clientes…" : "Selecciona un cliente"}</option>
+              {customers.map((customer) => {
+                const unavailable = customer.accountStatus !== "active" || customer.hasOverdue || customer.creditLimitCents - customer.balanceCents < totalCents;
+                return <option key={customer.id} value={customer.id} disabled={unavailable}>{customer.name} · disponible {money(Math.max(0, customer.creditLimitCents - customer.balanceCents))}{unavailable ? customer.hasOverdue ? " · saldo vencido" : " · no disponible" : ""}</option>;
+              })}
+            </select>
+            {customerId && (() => { const selected = customers.find((item) => item.id === Number(customerId)); return selected ? <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Saldo actual {money(selected.balanceCents)} · límite {money(selected.creditLimitCents)} · {selected.creditDays} días. La cuenta se validará al confirmar.</p> : null; })()}
+            {customersError && <p role="alert" className="text-sm text-rose-700">{customersError}</p>}
+            <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Se cargará {money(totalCents)} a la cuenta del cliente. Esta venta no registra un pago en caja.</p>
+          </div>
+        ) : method === "cash" ? (
           <div className="space-y-3">
             <label className="block text-sm font-semibold text-slate-700" htmlFor="pos-received">
               Efectivo recibido
