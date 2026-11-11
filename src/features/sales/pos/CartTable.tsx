@@ -45,7 +45,7 @@ function EmptyState() {
         <ScanBarcode size={38} strokeWidth={1.6} />
       </span>
       <p className="text-sm font-semibold text-slate-700">Listo para escanear o buscar productos</p>
-      <p className="mt-1 text-xs text-slate-400">Escanea con el lector o presiona F4 para buscar por nombre</p>
+      <p className="mt-1 text-xs text-slate-400">Escanea con el lector o presiona F6 para buscar por nombre</p>
     </div>
   );
 }

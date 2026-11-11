@@ -11,7 +11,8 @@
  * 1. Sincronización Estado/Ref (cartRef): Previene duplicaciones de ítems causadas 
  *    por disparos ultra rápidos de lectores de código de barras USB/láser.
  * 2. Atajos de Teclado Globales:
- *    - F1: Cancelar venta | F2: Cantidad de captura | F3: Editar artículo | F4: Buscar | F12: Cobrar.
+ *    - F1: Cancelar venta | F2: Descuento | F3: Editar artículo | F4: Enfocar código
+ *      | F6 / Ctrl+F: Buscador de productos | F8: Retiro | F12: Cobrar.
  * 3. Idempotencia en Transacciones: Usa UUIDs y fingerprints de carga para evitar 
  *    ventas duplicadas al reintentar envíos a la API.
  * 4. Control de Turno: Bloquea las operaciones de cobro si no existe una caja abierta (`CashSession`).
@@ -35,6 +36,7 @@ import ConfirmDialog from "./pos/ConfirmDialog";
 import ChangeReceiptDialog from "./pos/ChangeReceiptDialog";
 import GlobalDiscountDialog from "./pos/GlobalDiscountDialog";
 import PaymentDialog, { type PaymentMethod } from "./pos/PaymentDialog";
+import ProductSearchDialog from "./pos/ProductSearchDialog";
 import ProductPreview from "./pos/ProductPreview";
 import QuickEntryBar from "./pos/QuickEntryBar";
 import TotalsCard from "./pos/TotalsCard";
@@ -80,6 +82,7 @@ export default function SalesPage() {
   const [paying, setPaying] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
   const [globalDiscountOpen, setGlobalDiscountOpen] = useState(false);
+  const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payError, setPayError] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
@@ -294,6 +297,19 @@ export default function SalesPage() {
     addProduct(product, quantityMilli);
   }
 
+  /** Producto elegido en el buscador modal: se agrega con la cantidad del campo "Cantidad". */
+  function pickFromSearch(product: Product) {
+    setProductSearchOpen(false);
+    const quantityMilli = parseQuantityInput(quantityText);
+    if (quantityMilli === null) {
+      setError("Escribe una cantidad válida (mayor que cero).");
+      quantityRef.current?.focus();
+      quantityRef.current?.select();
+      return;
+    }
+    addProduct(product, quantityMilli);
+  }
+
   function moveSelection(delta: number) {
     const lines = cartRef.current;
     if (lines.length === 0) return;
@@ -503,7 +519,7 @@ export default function SalesPage() {
       if (event.key === "F12" && !cash && cashLoaded && canManageCart) {
         event.preventDefault(); setError(""); setOpeningCash(true); return;
       }
-      if (paying || confirmClear || clearAuthOpen || adminAction || globalDiscountOpen || withdrawalOpen || Boolean(receipt)) return;
+      if (paying || confirmClear || clearAuthOpen || adminAction || globalDiscountOpen || productSearchOpen || withdrawalOpen || Boolean(receipt)) return;
 
       const hasItems = cartRef.current.length > 0;
       const isInputActive = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
@@ -534,6 +550,11 @@ export default function SalesPage() {
           event.preventDefault();
           setError("");
           focusMain(true);
+          return;
+        case "F6":
+          event.preventDefault();
+          setError("");
+          setProductSearchOpen(true);
           return;
         case "F8":
           if (user?.role === "admin" || user?.role === "cashier") {
@@ -577,6 +598,14 @@ export default function SalesPage() {
         return;
       }
 
+      // Abrir el buscador de productos con Ctrl+F
+      if (event.ctrlKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setError("");
+        setProductSearchOpen(true);
+        return;
+      }
+
       // Cobrar con Ctrl+Enter en cualquier momento
       if (event.ctrlKey && event.key === "Enter") {
         event.preventDefault();
@@ -600,7 +629,7 @@ export default function SalesPage() {
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [adminAction, beginCharge, canManageCart, cash, cashLoaded, clearAuthOpen, confirmClear, focusMain, globalDiscountOpen, paying, query, receipt, requestEdit, selectedId, user?.role, withdrawalOpen]);
+  }, [adminAction, beginCharge, canManageCart, cash, cashLoaded, clearAuthOpen, confirmClear, focusMain, globalDiscountOpen, paying, productSearchOpen, query, receipt, requestEdit, selectedId, user?.role, withdrawalOpen]);
 
   /** Un clic en una zona vacía devuelve el foco al campo principal. */
   function handleWorkspaceClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -679,6 +708,7 @@ export default function SalesPage() {
               articleCount={totals.articleCount}
               hasItems={cart.length > 0}
               onCharge={beginCharge}
+              onOpenSearch={() => { setError(""); setProductSearchOpen(true); }}
             />
           </section>
 
@@ -758,6 +788,15 @@ export default function SalesPage() {
         )}
       {withdrawalOpen && <CashWithdrawalDialog onClose={() => { setWithdrawalOpen(false); focusMainSoon(); }} onSaved={() => { void getOpenCashSession().then(setCash).catch(() => undefined); }} />}
       
+      {productSearchOpen && (
+        <ProductSearchDialog
+          onPick={pickFromSearch}
+          onClose={() => {
+            setProductSearchOpen(false);
+            focusMainSoon();
+          }}
+        />
+      )}
       {globalDiscountOpen && (
         <GlobalDiscountDialog
           cartLength={cart.length}
