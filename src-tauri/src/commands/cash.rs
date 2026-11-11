@@ -441,7 +441,9 @@ pub struct CashClosureRequest {
 }
 
 fn counted_from_denominations(denominations: &[CashDenomination]) -> Result<i64, String> {
-    if denominations.is_empty() || denominations.len() > CASH_DENOMINATIONS.len() {
+    // Se permite una lista vacía: significa que se contó $0 (p. ej. turno sin ventas).
+    // El retiro de efectivo ya rechaza montos <= 0 por separado.
+    if denominations.len() > CASH_DENOMINATIONS.len() {
         return Err("Captura el conteo de efectivo por denominación.".into());
     }
     let mut seen = std::collections::HashSet::new();
@@ -510,9 +512,6 @@ pub async fn close_cash_session(
         .filter(|v| *v >= 0).ok_or_else(|| "El efectivo esperado no es válido.".to_string())?;
     let difference = counted_cents.checked_sub(expected)
         .ok_or_else(|| "La diferencia está fuera del rango válido.".to_string())?;
-    if difference != 0 && reason.is_empty() {
-        return Err("Indica el motivo del faltante o sobrante para cerrar el turno.".into());
-    }
 
     for item in &closure.denominations {
         sqlx::query("INSERT INTO cash_closure_denominations (session_id, denomination_cents, quantity, subtotal_cents) VALUES (?, ?, ?, ?)")
