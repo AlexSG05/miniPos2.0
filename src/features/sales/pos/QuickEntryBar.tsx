@@ -20,7 +20,7 @@
  * ============================================================================
  */
 import type { KeyboardEvent, RefObject } from "react";
-import { ScanBarcode } from "lucide-react";
+import { ScanBarcode, Search } from "lucide-react";
 import type { Product } from "../../products/products.api";
 import { UNIT_LABELS, money } from "./pos.utils";
 
@@ -40,6 +40,7 @@ type Props = {
   articleCount: number;
   hasItems: boolean;
   onCharge: () => void;
+  onOpenSearch: () => void;
 };
 
 const label = "mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500";
@@ -47,7 +48,7 @@ const kbd = "rounded border border-current/30 px-1 py-px text-[9px] font-bold le
 
 export default function QuickEntryBar({
   quantityText, onQuantityChange, query, onQueryChange, onInputKeyDown, inputRef, quantityRef,
-  suggestions, showSuggestions, highlight, onHighlight, onPick, articleCount, hasItems, onCharge,
+  suggestions, showSuggestions, highlight, onHighlight, onPick, articleCount, hasItems, onCharge, onOpenSearch,
 }: Props) {
   const count = Number.isInteger(articleCount) ? String(articleCount) : articleCount.toFixed(2);
 
@@ -139,6 +140,17 @@ export default function QuickEntryBar({
             />
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          title="Buscar producto por nombre (F6 o Ctrl+F)"
+          className="flex h-14 shrink-0 items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-blue-50"
+        >
+          <Search size={18} />
+          <span className="hidden sm:inline">Buscar</span>
+          <kbd className={kbd}>F6</kbd>
+        </button>
 
         <button
           type="button"
