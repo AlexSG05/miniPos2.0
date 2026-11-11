@@ -27,7 +27,7 @@ function RoleRoutes() {
       {(user.role === "admin" || user.role === "inventory") && <Route path="/productos" element={<ProductsPage />} />}
       {(user.role === "admin" || user.role === "inventory") && <Route path="/compras" element={<PurchasesPage />} />}
       {(user.role === "admin" || user.role === "cashier") && <Route path="/clientes" element={<CustomersPage />} />}
-      {(user.role === "admin" || user.role === "cashier") && <Route path="/caja" element={<CashRegisterPage />} />}
+      {user.role === "admin" && <Route path="/caja" element={<CashRegisterPage />} />}
       {user.role === "admin" && <Route path="/reportes" element={<ReportsPage />} />}
       {user.role === "admin" && <Route path="/configuracion" element={<SettingsPage />} />}
       {user.role === "admin" && <Route path="/usuarios" element={<UsersPage />} />}

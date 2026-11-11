@@ -17,6 +17,8 @@ export const logoutUser = (sessionToken: string) => invoke<void>("logout", { ses
 export const listUsers = () => invokeAuthed<UserInfo[]>("list_users");
 export const createUser = (username: string, displayName: string, password: string, role: UserRole, phone: string, hireDate: string) =>
   invokeAuthed<UserInfo>("create_user", { username, displayName, password, role, phone, hireDate });
+export const updateUser = (userId: number, displayName: string, role: UserRole, phone: string, hireDate: string) =>
+  invokeAuthed<UserInfo>("update_user", { userId, displayName, role, phone, hireDate });
 export const setUserActive = (userId: number, active: boolean) => invokeAuthed<void>("set_user_active", { userId, active });
 export const setUserRole = (userId: number, role: UserRole) => invokeAuthed<void>("set_user_role", { userId, role });
 export const resetUserPassword = (userId: number, password: string) => invokeAuthed<void>("reset_user_password", { userId, password });

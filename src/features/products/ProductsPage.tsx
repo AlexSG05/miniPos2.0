@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Archive, ArrowDownToLine, Boxes, CircleDollarSign, Clock3, Image as ImageIcon, PackagePlus, Plus, Search, Tags, X } from "lucide-react";
 import { createCategory, listCategories, type Category } from "./categories.api";
 import { adjustInventory, createProduct, listInventoryMovements, listProducts, setProductActive, updateProduct, type InventoryMovement, type NewProduct, type Product, type ProductUpdate } from "./products.api";
@@ -24,6 +24,77 @@ export default function ProductsPage() {
   const [success, setSuccess] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [adjustment, setAdjustment] = useState({ productId: "", quantity: "", direction: "in" as "in" | "out", reason: "" });
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  /* ---------- Atajos de teclado en catálogo e inventario ---------- */
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const isInputActive =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement ||
+        document.activeElement instanceof HTMLSelectElement;
+
+      // Escape para cerrar modales o limpiar búsqueda
+      if (event.key === "Escape") {
+        if (modal !== null) {
+          event.preventDefault();
+          setModal(null);
+        } else if (productModal !== undefined) {
+          event.preventDefault();
+          setProductModal(undefined);
+        } else if (search) {
+          event.preventDefault();
+          setSearch("");
+        }
+        return;
+      }
+
+      // Si hay un modal abierto, no interferir con atajos globales
+      if (modal !== null || productModal !== undefined) return;
+
+      // F2 o Ctrl+N o Alt+N: Nuevo producto
+      if (
+        event.key === "F2" ||
+        (event.ctrlKey && event.key.toLowerCase() === "n") ||
+        (event.altKey && event.key.toLowerCase() === "n")
+      ) {
+        event.preventDefault();
+        setProductModal(null);
+        return;
+      }
+
+      // F4 o Ctrl+F o Alt+B o '/' (cuando no está escribiendo): Buscar
+      if (
+        event.key === "F4" ||
+        (event.ctrlKey && event.key.toLowerCase() === "f") ||
+        (event.altKey && event.key.toLowerCase() === "b") ||
+        (event.key === "/" && !isInputActive)
+      ) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      // Alt+A: Ajustar existencias
+      if (event.altKey && event.key.toLowerCase() === "a") {
+        if (products.some((product) => product.active)) {
+          event.preventDefault();
+          setModal("adjustment");
+        }
+        return;
+      }
+
+      // Alt+D: Nuevo departamento
+      if (event.altKey && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        setModal("category");
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modal, productModal, products, search]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -151,9 +222,37 @@ export default function ProductsPage() {
           <h1 className="mt-1 text-2xl font-bold text-slate-900">Productos</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setModal("category")} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Tags size={16} /> Departamento</button>
-          <button type="button" onClick={() => setModal("adjustment")} disabled={!products.some((product) => product.active)} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><ArrowDownToLine size={16} /> Ajustar stock</button>
-          <button type="button" onClick={() => setProductModal(null)} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"><Plus size={17} /> Nuevo producto</button>
+          <button
+            type="button"
+            onClick={() => setModal("category")}
+            title="Crear nuevo departamento (Alt+D)"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <Tags size={16} />
+            <span>Departamento</span>
+            <kbd className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">Alt+D</kbd>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal("adjustment")}
+            disabled={!products.some((product) => product.active)}
+            title="Ajustar existencias de stock (Alt+A)"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            <ArrowDownToLine size={16} />
+            <span>Ajustar stock</span>
+            <kbd className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">Alt+A</kbd>
+          </button>
+          <button
+            type="button"
+            onClick={() => setProductModal(null)}
+            title="Dar de alta un nuevo producto (F2 o Ctrl+N)"
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <Plus size={17} />
+            <span>Nuevo producto</span>
+            <kbd className="rounded border border-white/40 bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white">F2</kbd>
+          </button>
         </div>
       </header>
 
@@ -168,7 +267,18 @@ export default function ProductsPage() {
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 p-3">
-          <label className="relative min-w-[220px] flex-1"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar nombre, código o clave SAT…" aria-label="Buscar productos" /></label>
+          <label className="relative min-w-[220px] flex-1">
+            <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              ref={searchInputRef}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-12 text-sm outline-none focus:border-blue-500 focus:bg-white"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar nombre, código o clave SAT…"
+              aria-label="Buscar productos"
+            />
+            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-400">F4</kbd>
+          </label>
           <select className="min-w-[190px] rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por departamento"><option value="">Todos los departamentos</option>{categories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
           <label className="flex items-center gap-2 px-1 text-sm text-slate-600"><input type="checkbox" checked={includeInactive} onChange={(event) => setIncludeInactive(event.target.checked)} className="rounded border-slate-300 text-blue-600" />Archivados</label>
           <button type="button" onClick={() => void showMovements()} className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"><Clock3 size={16} /> Movimientos</button>

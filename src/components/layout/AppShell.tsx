@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Activity } from "lucide-react";
 import { useAuth } from "../../features/auth/useAuth";
 import { getOpenCashSession } from "../../features/cash-register/cash.api";
 import { getBusinessSettings } from "../../features/settings/settings.api";
@@ -67,8 +66,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </main>
       {!isSalesPage && (
         <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-2.5 text-xs text-slate-400">
-          <span className="flex items-center gap-1"><Activity size={12} /> Modo local</span>
-          <span>MiniPOS · V0.1.0</span>
+          <span>MiniPOS</span>
         </footer>
       )}
     </div>

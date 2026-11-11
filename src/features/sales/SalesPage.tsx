@@ -22,9 +22,8 @@ import {
   useCallback, useEffect, useMemo, useRef, useState,
   type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { AlertCircle, Banknote, CheckCircle2, X } from "lucide-react";
-import { getOpenCashSession, type CashSession } from "../cash-register/cash.api";
+import { AlertCircle, X } from "lucide-react";
+import { closeCashSession, getOpenCashSession, openCashSession, type CashClosure, type CashDenomination, type CashSession } from "../cash-register/cash.api";
 import type { Product } from "../products/products.api";
 import { getBusinessSettings } from "../settings/settings.api";
 import { completeSale, searchSaleProducts, type SaleReceipt } from "./sales.api";
@@ -33,33 +32,43 @@ import { useAuth } from "../auth/useAuth";
 import CartTable from "./pos/CartTable";
 import ClockCard from "./pos/ClockCard";
 import ConfirmDialog from "./pos/ConfirmDialog";
+import ChangeReceiptDialog from "./pos/ChangeReceiptDialog";
+import GlobalDiscountDialog from "./pos/GlobalDiscountDialog";
 import PaymentDialog, { type PaymentMethod } from "./pos/PaymentDialog";
 import ProductPreview from "./pos/ProductPreview";
 import QuickEntryBar from "./pos/QuickEntryBar";
 import TotalsCard from "./pos/TotalsCard";
 import CashWithdrawalDialog from "../cash-register/CashWithdrawalDialog";
 import {
-  addToCart, calculateTotals, findExact, looksLikeBarcode, money, parseEntry, parseQuantityInput,
+  addToCart, calculateTotals, clampPercent, findExact, looksLikeBarcode, parseEntry, parseQuantityInput,
   removeFromCart, setLineDiscount, setLineQuantity, type CartLine,
 } from "./pos/pos.utils";
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const money = (cents: number) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 const NO_SUGGESTIONS = { term: "", items: [] as Product[] };
 
 export default function SalesPage() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const canManageCart = user?.role === "admin" || user?.role === "cashier";
 
   const [cash, setCash] = useState<CashSession | null>(null);
   const [cashLoaded, setCashLoaded] = useState(false);
+  const [openingCash, setOpeningCash] = useState(false);
+  const [closingCash, setClosingCash] = useState(false);
+  const [initialCash, setInitialCash] = useState("0.00");
+  const [openingNote, setOpeningNote] = useState("");
+  const [declaredCash, setDeclaredCash] = useState("");
+  const [cashSaving, setCashSaving] = useState(false);
+  const [cashError, setCashError] = useState("");
+  const [closedReport, setClosedReport] = useState<CashClosure | null>(null);
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState<number | null>(null);
 
   // El carrito vive también en un ref para validar sin depender del último render
   // (un lector de códigos puede disparar dos Enter seguidos).
   const [cart, setCart] = useState<CartLine[]>([]);
   const cartRef = useRef<CartLine[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [lastProduct, setLastProduct] = useState<Product | null>(null);
   const [lastFolio, setLastFolio] = useState<string | null>(null);
 
@@ -70,11 +79,12 @@ export default function SalesPage() {
 
   const [paying, setPaying] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  const [globalDiscountOpen, setGlobalDiscountOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payError, setPayError] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearAuthOpen, setClearAuthOpen] = useState(false);
-  const [adminAction, setAdminAction] = useState<{ kind: "edit" | "remove"; productId: number } | null>(null);
+  const [adminAction, setAdminAction] = useState<{ kind: "edit" | "remove"; lineId: string } | null>(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
   const [adminOptions, setAdminOptions] = useState<AdminOption[]>([]);
@@ -102,7 +112,65 @@ export default function SalesPage() {
     cartRef.current = next;
     setCart(next);
   }, []);
+  const isShiftOpen = Boolean(cash);
+  const currentShiftData = cash;
 
+  async function submitCashOpen(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setCashSaving(true); setCashError("");
+    try {
+      const cents = Math.round(Number(initialCash) * 100);
+      if (!Number.isSafeInteger(cents) || cents < 0) throw new Error("Ingresa un fondo inicial válido.");
+      const session = await openCashSession(cents, openingNote.trim());
+      setCash(session); setOpeningCash(false); setOpeningNote("");
+      if (cartRef.current.length > 0) {
+        if (taxRateBasisPoints === null) setError("Cargando la configuración de impuestos. Intenta de nuevo en un momento.");
+        else { setPayError(""); setPaying(true); }
+      }
+    } catch (cause) { setCashError(messageOf(cause)); }
+    finally { setCashSaving(false); }
+  }
+
+  async function submitCashClose(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+  if (!cash) return;
+  setCashSaving(true);
+  setCashError("");
+
+  try {
+    const counted = Math.round(Number(declaredCash) * 100);
+    if (!Number.isSafeInteger(counted) || counted < 0) throw new Error("Ingresa un efectivo contado válido.");
+    if (counted % 5 !== 0) throw new Error("El efectivo contado debe corresponder a las denominaciones disponibles (múltiplos de $0.05).");
+
+    let remainder = counted;
+    const denominations: CashDenomination[] = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20, 10, 5]
+      .map((denominationCents) => {
+        const quantity = Math.floor(remainder / denominationCents);
+        remainder %= denominationCents;
+        return { denominationCents, quantity, subtotalCents: denominationCents * quantity };
+      })
+      .filter((item) => item.quantity > 0);
+
+    // Si hay diferencia, mandamos un motivo automático para cumplir la validación del backend
+    const difference = counted - cash.expectedCents;
+    const differenceReason =
+      difference === 0
+        ? ""
+        : difference < 0
+        ? "Faltante registrado al cierre de caja"
+        : "Sobrante registrado al cierre de caja";
+
+    const closure = await closeCashSession({ denominations, differenceReason });
+
+    setCash(null);
+    setClosingCash(false);
+    setClosedReport(closure);
+    setDeclaredCash("");
+  } catch (cause) {
+    setCashError(messageOf(cause));
+  } finally {
+    setCashSaving(false);
+  }
+}
   /* ---------- Carga inicial ---------- */
   useEffect(() => {
     let active = true;
@@ -175,7 +243,8 @@ export default function SalesPage() {
       setError(result.error);
     } else {
       commitCart(result.cart);
-      setSelectedId(product.id);
+      const added = result.cart[result.cart.length - 1];
+      setSelectedId(added?.lineId ?? null);
       setLastProduct(product);
       setReceipt(null);
       setError("");
@@ -228,9 +297,9 @@ export default function SalesPage() {
   function moveSelection(delta: number) {
     const lines = cartRef.current;
     if (lines.length === 0) return;
-    const index = lines.findIndex((line) => line.product.id === selectedId);
+    const index = lines.findIndex((line) => line.lineId === selectedId);
     const next = index === -1 ? lines.length - 1 : Math.min(lines.length - 1, Math.max(0, index + delta));
-    setSelectedId(lines[next].product.id);
+    setSelectedId(lines[next].lineId);
   }
 
   function handleInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -263,35 +332,35 @@ export default function SalesPage() {
   }
 
   /* ---------- Edición del carrito ---------- */
-  function removeLine(productId: number) {
+  function removeLine(lineId: string) {
     const lines = cartRef.current;
-    const index = lines.findIndex((line) => line.product.id === productId);
+    const index = lines.findIndex((line) => line.lineId === lineId);
     if (index === -1) return;
-    const next = removeFromCart(lines, productId);
+    const next = removeFromCart(lines, lineId);
     commitCart(next);
-    setSelectedId(next.length > 0 ? next[Math.min(index, next.length - 1)].product.id : null);
+    setSelectedId(next.length > 0 ? next[Math.min(index, next.length - 1)].lineId : null);
     focusMainSoon();
   }
 
-  function requestEdit(productId: number) {
+  function requestEdit(lineId: string) {
     if (!canManageCart) return;
-    const line = cartRef.current.find((item) => item.product.id === productId);
+    const line = cartRef.current.find((item) => item.lineId === lineId);
     if (!line) return;
-    setAdminAction({ kind: "edit", productId });
+    setAdminAction({ kind: "edit", lineId });
     setAdminQuantityText((line.quantityMilli / 1000).toString());
     setAdminDiscountText(String(line.discountPercent));
     if (user?.role === "cashier") setAdminPassword("");
     setAdminActionError("");
   }
 
-  function requestRemove(productId: number) {
+  function requestRemove(lineId: string) {
     if (!canManageCart) return;
-    if (!cartRef.current.some((line) => line.product.id === productId)) return;
+    if (!cartRef.current.some((line) => line.lineId === lineId)) return;
     if (user?.role === "admin") {
-      removeLine(productId);
+      removeLine(lineId);
       return;
     }
-    setAdminAction({ kind: "remove", productId });
+    setAdminAction({ kind: "remove", lineId });
     setAdminPassword("");
     setAdminActionError("");
   }
@@ -304,18 +373,18 @@ export default function SalesPage() {
     try {
       if (user?.role === "cashier") await authorizeAdminAction(adminUsername, adminPassword);
       if (adminAction.kind === "remove") {
-        removeLine(adminAction.productId);
+        removeLine(adminAction.lineId);
       } else {
         const quantityMilli = parseQuantityInput(adminQuantityText);
         if (quantityMilli === null) { setAdminActionError("Ingresa una cantidad mayor que cero."); return; }
-        const result = setLineQuantity(cartRef.current, adminAction.productId, quantityMilli);
+        const result = setLineQuantity(cartRef.current, adminAction.lineId, quantityMilli);
         if (result.error) { setAdminActionError(result.error); return; }
         const discountPercent = Number(adminDiscountText.replace(",", "."));
         if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
           setAdminActionError("El descuento debe estar entre 0 y 100%.");
           return;
         }
-        commitCart(setLineDiscount(result.cart, adminAction.productId, discountPercent));
+        commitCart(setLineDiscount(result.cart, adminAction.lineId, discountPercent));
       }
       setAdminAction(null);
       setAdminPassword("");
@@ -367,8 +436,7 @@ export default function SalesPage() {
     const hasItems = cartRef.current.length > 0;
     if (!cash) {
       if (!cashLoaded) return;
-      if (hasItems) setError("Abre el turno (caja) antes de cobrar.");
-      else navigate("/caja");
+      setError(""); setOpeningCash(true);
       return;
     }
     if (!hasItems) {
@@ -381,7 +449,7 @@ export default function SalesPage() {
     }
     setPayError("");
     setPaying(true);
-  }, [cash, cashLoaded, focusMain, navigate, taxRateBasisPoints]);
+  }, [cash, cashLoaded, focusMain, taxRateBasisPoints]);
 
   async function completeCharge(method: PaymentMethod, receivedCents: number, customerId?: number) {
     const lines = cartRef.current;
@@ -419,111 +487,167 @@ export default function SalesPage() {
     }
   }
 
-  /* ---------- Atajos globales: F1 cancelar · F2 cantidad · F3 descuento · F4 buscar · F12 cobrar ---------- */
+  function handleApplyGlobalDiscount(percent: number) {
+    const clamped = clampPercent(percent);
+    const updated = cartRef.current.map((line) => ({
+      ...line,
+      discountPercent: clamped,
+    }));
+    commitCart(updated);
+    focusMainSoon();
+  }
+
+  /* ---------- Atajos globales: F1 cancelar · F2 descuento · F3 cantidad · F4 buscar · F8 retiro · F12 cobrar ---------- */
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (paying || confirmClear || clearAuthOpen || adminAction) return; // los diálogos manejan sus propias teclas
-      if (withdrawalOpen) return;
+      if (event.key === "F12" && !cash && cashLoaded && canManageCart) {
+        event.preventDefault(); setError(""); setOpeningCash(true); return;
+      }
+      if (paying || confirmClear || clearAuthOpen || adminAction || globalDiscountOpen || withdrawalOpen || Boolean(receipt)) return;
+
+      const hasItems = cartRef.current.length > 0;
+      const isInputActive = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
+
+      // Atajos de Teclas de Función F1 - F12
       switch (event.key) {
-        case "F8":
-          if (user?.role === "admin" || user?.role === "cashier") { event.preventDefault(); setWithdrawalOpen(true); }
-          break;
         case "F1":
           event.preventDefault();
-          if (cartRef.current.length > 0) setConfirmClear(true);
-          break;
+          if (hasItems) setConfirmClear(true);
+          return;
         case "F2":
           event.preventDefault();
-          quantityRef.current?.focus();
-          quantityRef.current?.select();
-          break;
+          if (hasItems) setGlobalDiscountOpen(true);
+          return;
         case "F3": {
           event.preventDefault();
-          const id = selectedId ?? cartRef.current.at(-1)?.product.id;
-          if (id === undefined) break;
-          setSelectedId(id);
-          if (canManageCart) {
-            const line = cartRef.current.find((item) => item.product.id === id);
-            if (line) {
-              setAdminAction({ kind: "edit", productId: id });
-              setAdminQuantityText((line.quantityMilli / 1000).toString());
-              setAdminDiscountText(String(line.discountPercent));
-              setAdminPassword("");
-              setAdminActionError("");
-            }
+          const id = selectedId ?? cartRef.current.at(-1)?.lineId;
+          if (id !== undefined) {
+            setSelectedId(id);
+            requestEdit(id);
+          } else {
+            quantityRef.current?.focus();
+            quantityRef.current?.select();
           }
-          break;
+          return;
         }
         case "F4":
           event.preventDefault();
           setError("");
           focusMain(true);
-          break;
+          return;
+        case "F8":
+          if (user?.role === "admin" || user?.role === "cashier") {
+            event.preventDefault();
+            setWithdrawalOpen(true);
+          }
+          return;
         case "F12":
           event.preventDefault();
           beginCharge();
-          break;
+          return;
+      }
+
+      // Atajos alternativos para Laptop (Alt + Letra)
+      if (event.altKey) {
+        const key = event.key.toLowerCase();
+        if (key === "x" && hasItems) {
+          event.preventDefault();
+          setConfirmClear(true);
+        } else if (key === "d" && hasItems) {
+          event.preventDefault();
+          setGlobalDiscountOpen(true);
+        } else if (key === "c") {
+          event.preventDefault();
+          const id = selectedId ?? cartRef.current.at(-1)?.lineId;
+          if (id !== undefined) {
+            setSelectedId(id);
+            requestEdit(id);
+          } else {
+            quantityRef.current?.focus();
+            quantityRef.current?.select();
+          }
+        } else if (key === "b") {
+          event.preventDefault();
+          setError("");
+          focusMain(true);
+        } else if (key === "r" && (user?.role === "admin" || user?.role === "cashier")) {
+          event.preventDefault();
+          setWithdrawalOpen(true);
+        }
+        return;
+      }
+
+      // Cobrar con Ctrl+Enter en cualquier momento
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        beginCharge();
+        return;
+      }
+
+      // Cobrar con '+' si el buscador está vacío
+      if (event.key === "+" && !query && document.activeElement === inputRef.current && hasItems) {
+        event.preventDefault();
+        beginCharge();
+        return;
+      }
+
+      // Buscar con '/' si no se está escribiendo en un input
+      if (event.key === "/" && !isInputActive) {
+        event.preventDefault();
+        focusMain(true);
+        return;
       }
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [adminAction, beginCharge, canManageCart, clearAuthOpen, confirmClear, focusMain, paying, selectedId, user?.role, withdrawalOpen]);
+  }, [adminAction, beginCharge, canManageCart, cash, cashLoaded, clearAuthOpen, confirmClear, focusMain, globalDiscountOpen, paying, query, receipt, requestEdit, selectedId, user?.role, withdrawalOpen]);
 
   /** Un clic en una zona vacía devuelve el foco al campo principal. */
   function handleWorkspaceClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (paying || confirmClear || clearAuthOpen || adminAction) return;
+    if (paying || confirmClear || clearAuthOpen || adminAction || receipt) return;
     if ((event.target as HTMLElement).closest("input, textarea, select, a, [role='option']")) return;
     focusMain();
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-100 text-slate-800">
-
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+  <div></div>
+    <button
+      type="button"
+      disabled={!cashLoaded || !canManageCart}
+      onClick={() => {
+        setCashError("");
+        if (isShiftOpen && currentShiftData) {
+          setDeclaredCash("");
+          setClosingCash(true);
+        } else setOpeningCash(true);
+      }}
+      className={`rounded-xl px-4 py-2 text-sm font-bold transition disabled:cursor-wait disabled:opacity-50 ${
+        isShiftOpen
+          ? "bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 shadow-sm shadow-rose-200"
+          : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+      }`}
+    >
+      {isShiftOpen && currentShiftData
+        ? `Cerrar turno #${currentShiftData.id}`
+        : cashLoaded
+        ? "Abrir caja"
+        : "Consultando caja…"}
+    </button>
+  </div>
       <div className="min-h-0 flex-1 overflow-hidden" onClick={handleWorkspaceClick}>
         <div className="grid min-h-full grid-cols-1 gap-3 p-3 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,2.1fr)_minmax(340px,1fr)] lg:gap-4 lg:p-4">
           <section className="flex min-h-[460px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
-            {(user?.role === "admin" || user?.role === "cashier") && <div className="flex shrink-0 justify-end border-b border-slate-100 px-3 py-2"><button type="button" onClick={() => setWithdrawalOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100"><Banknote size={16}/> Retiro de caja <kbd className="rounded bg-white px-1.5 py-0.5 text-[10px]">F8</kbd></button></div>}
-            {(error || receipt || (cashLoaded && !cash)) && (
+            {error && (
               <div className="shrink-0 space-y-2 border-b border-slate-100 p-3">
-                {error && (
-                  <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
-                    <AlertCircle className="mt-0.5 shrink-0" size={18} />
-                    <p className="min-w-0 flex-1">{error}</p>
-                    <button type="button" aria-label="Cerrar aviso" onClick={() => setError("")} className="rounded p-1 text-rose-700 hover:bg-rose-100">
-                      <X size={16} />
-                    </button>
-                  </div>
-                )}
-                {cashLoaded && !cash && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
-                    <p>El turno está cerrado. Ábrelo para poder cobrar.</p>
-                    <Link to="/caja" className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">
-                      Abrir turno
-                    </Link>
-                  </div>
-                )}
-                {receipt && (
-                  <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-emerald-900">
-                    <div className="flex items-center gap-3">
-                      <CheckCircle2 size={22} className="shrink-0" />
-                      <div>
-                        <strong className="text-sm">Venta completada · {receipt.folio}</strong>
-                        <p className="text-xs text-emerald-800">Total {money(receipt.totalCents)}{receipt.paymentMethod === "credit" && receipt.customerName ? ` · Cuenta de ${receipt.customerName}${receipt.dueAt ? ` · vence ${new Date(`${receipt.dueAt.slice(0, 10)}T12:00:00`).toLocaleDateString("es-MX")}` : ""}` : ""}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      {receipt.changeCents > 0 && (
-                        <p className="text-right">
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-700">Cambio</span>
-                          <span className="text-3xl font-extrabold tabular-nums">{money(receipt.changeCents)}</span>
-                        </p>
-                      )}
-                      <button type="button" aria-label="Cerrar aviso" onClick={() => setReceipt(null)} className="rounded p-1 text-emerald-700 hover:bg-emerald-100">
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+                  <AlertCircle className="mt-0.5 shrink-0" size={18} />
+                  <p className="min-w-0 flex-1">{error}</p>
+                  <button type="button" aria-label="Cerrar aviso" onClick={() => setError("")} className="rounded p-1 text-rose-700 hover:bg-rose-100">
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -535,6 +659,8 @@ export default function SalesPage() {
               onEdit={requestEdit}
               onRemove={requestRemove}
               onClear={() => setConfirmClear(true)}
+              onOpenWithdrawal={user?.role === "admin" || user?.role === "cashier" ? () => setWithdrawalOpen(true) : undefined}
+              onOpenDiscount={() => setGlobalDiscountOpen(true)}
             />
 
             <QuickEntryBar
@@ -564,7 +690,86 @@ export default function SalesPage() {
         </div>
       </div>
 
+      {receipt && (
+        <ChangeReceiptDialog
+          receipt={receipt}
+          onClose={() => {
+            setReceipt(null);
+            focusMainSoon();
+          }}
+        />
+      )}
+      
+      {openingCash && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4"><section role="dialog" aria-modal="true" aria-labelledby="cash-open-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Inicio de turno</p><h2 id="cash-open-title" className="mt-1 text-xl font-bold text-slate-900">Apertura de caja</h2><p className="mt-2 text-sm text-slate-600">Registra el efectivo disponible para dar cambio. Al confirmar, podrás continuar con el cobro del carrito.</p><form onSubmit={(event) => void submitCashOpen(event)} className="mt-5 grid gap-4"><label className="text-sm font-medium">Fondo de caja inicial (MXN)<input autoFocus required type="number" min="0" step="0.01" value={initialCash} onChange={(event) => setInitialCash(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-emerald-500" /></label><label className="text-sm font-medium">Notas u observaciones <span className="font-normal text-slate-400">(opcional)</span><textarea rows={2} maxLength={240} value={openingNote} onChange={(event) => setOpeningNote(event.target.value)} placeholder="Ej. Entregado por supervisión" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-emerald-500" /></label>{cashError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{cashError}</p>}<div className="flex justify-end gap-2"><button type="button" disabled={cashSaving} onClick={() => setOpeningCash(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold">Cancelar</button><button disabled={cashSaving} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{cashSaving ? "Abriendo…" : "Confirmar apertura"}</button></div></form></section></div>}{closedReport && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4"><section role="dialog" aria-modal="true" aria-labelledby="z-report-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Corte Z guardado</p><h2 id="z-report-title" className="mt-1 text-xl font-bold">Resumen · Turno #{closedReport.id}</h2><div className="mt-4 space-y-2 border-y border-slate-200 py-4 text-sm"><p className="flex justify-between"><span>Abrió</span><strong>{closedReport.openedByName}</strong></p><p className="flex justify-between"><span>Fondo inicial</span><strong>{money(closedReport.openingCents)}</strong></p><p className="flex justify-between"><span>Efectivo esperado</span><strong>{money(closedReport.expectedCents)}</strong></p><p className="flex justify-between"><span>Contado</span><strong>{money(closedReport.countedCents)}</strong></p><p className="flex justify-between font-bold"><span>Diferencia</span><strong>{money(closedReport.differenceCents)}</strong></p></div>{closedReport.differenceReason && <p className="mt-3 text-sm text-slate-600">Motivo: {closedReport.differenceReason}</p>}<div className="mt-5 flex justify-end gap-2"><button onClick={() => window.print()} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold">Imprimir</button><button onClick={() => setClosedReport(null)} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Listo</button></div></section></div>}
+      {closingCash && cash && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4">
+            <section role="dialog" aria-modal="true" aria-labelledby="cash-close-title" className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-8 shadow-2xl">
+              <p className="text-sm font-bold uppercase tracking-wider text-blue-700">Turno #{cash.id}</p>
+              <h2 id="cash-close-title" className="mt-1 text-2xl font-extrabold text-slate-900">Cierre de caja</h2>
+              
+              <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 rounded-2xl bg-slate-50 p-5 text-base">
+                <span className="text-slate-500 font-medium">Cajero activo</span>
+                <strong className="text-right text-slate-900">{cash.openedByName}</strong>
+                <span className="text-slate-500 font-medium">Hora de apertura</span>
+                <strong className="text-right text-slate-900">{new Date(cash.openedAt).toLocaleString("es-MX")}</strong>
+                <span className="text-slate-500 font-medium">Fondo inicial</span>
+                <strong className="text-right text-slate-900">{money(cash.openingCents)}</strong>
+              </div>
+
+              <form onSubmit={(event) => void submitCashClose(event)} className="mt-6 grid gap-6">
+                <div className="flex flex-col items-center">
+                  <label className="text-base font-semibold text-slate-800 mb-2 text-center">
+                    Efectivo declarado
+                  </label>
+                  <input 
+                    autoFocus 
+                    required 
+                    type="number" 
+                    min="0" 
+                    step="0.01" 
+                    value={declaredCash}
+                    onChange={(event) => setDeclaredCash(event.target.value)} 
+                    className="w-full max-w-xs rounded-xl border-2 border-slate-300 px-4 py-3 text-center text-xl font-bold outline-none focus:border-blue-500 transition-all shadow-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                  />
+                </div>
+                
+                {cashError && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-base font-medium text-rose-700">{cashError}</p>}
+                
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                  <button 
+                    type="button" 
+                    disabled={cashSaving} 
+                    onClick={() => setClosingCash(false)} 
+                    className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-base font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    Continuar vendiendo
+                  </button>
+                  
+                  <button 
+                    disabled={cashSaving || !declaredCash} 
+                    className="rounded-xl bg-rose-600 px-6 py-3 text-base font-semibold text-white hover:bg-rose-700 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    {cashSaving ? "Guardando cierre…" : "Finalizar cierre de caja"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
       {withdrawalOpen && <CashWithdrawalDialog onClose={() => { setWithdrawalOpen(false); focusMainSoon(); }} onSaved={() => { void getOpenCashSession().then(setCash).catch(() => undefined); }} />}
+      
+      {globalDiscountOpen && (
+        <GlobalDiscountDialog
+          cartLength={cart.length}
+          userRole={user?.role}
+          adminOptions={adminOptions}
+          onApply={handleApplyGlobalDiscount}
+          onClose={() => {
+            setGlobalDiscountOpen(false);
+            focusMainSoon();
+          }}
+        />
+      )}
       {paying && (
         <PaymentDialog
           totalCents={totals.totalCents}
@@ -605,7 +810,7 @@ export default function SalesPage() {
         </div>
       )}
       {adminAction && (() => {
-        const line = cart.find((item) => item.product.id === adminAction.productId);
+        const line = cart.find((item) => item.lineId === adminAction.lineId);
         if (!line) return null;
         const editing = adminAction.kind === "edit";
         return (

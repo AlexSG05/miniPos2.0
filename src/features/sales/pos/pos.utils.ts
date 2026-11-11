@@ -21,8 +21,7 @@
 import type { Product } from "../../products/products.api";
 
 export type Unit = Product["unit"];
-/** Una línea del carrito. `quantityMilli` = cantidad × 1000 (igual que el backend). */
-export type CartLine = { product: Product; quantityMilli: number; discountPercent: number };
+export type CartLine = { lineId: string; product: Product; quantityMilli: number; discountPercent: number };
 export type CartResult = { cart: CartLine[]; error?: string };
 
 const currency = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
@@ -98,6 +97,12 @@ export function calculateTotals(cart: CartLine[], taxRateBasisPoints: number | n
 
 /* ---------- Operaciones del carrito (puras) ---------- */
 
+export function createLineId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export function addToCart(cart: CartLine[], product: Product, quantityMilli: number): CartResult {
   if (!Number.isFinite(quantityMilli) || quantityMilli <= 0) {
     return { cart, error: "La cantidad debe ser mayor que cero." };
@@ -106,40 +111,41 @@ export function addToCart(cart: CartLine[], product: Product, quantityMilli: num
     return { cart, error: `${product.name} se vende en piezas enteras.` };
   }
   if (!product.active) return { cart, error: `${product.name} está inactivo.` };
-  const current = cart.find((line) => line.product.id === product.id);
-  if (current) {
-    return {
-      cart: cart.map((line) =>
-        line.product.id === product.id ? { ...line, quantityMilli: line.quantityMilli + quantityMilli } : line
-      ),
-    };
-  }
-  return { cart: [...cart, { product, quantityMilli, discountPercent: 0 }] };
+
+  // Cada escaneo o captura es un renglón independiente en el ticket/caja
+  const newLine: CartLine = {
+    lineId: createLineId(),
+    product,
+    quantityMilli,
+    discountPercent: 0,
+  };
+
+  return { cart: [...cart, newLine] };
 }
 
-export function setLineQuantity(cart: CartLine[], productId: number, quantityMilli: number): CartResult {
-  const line = cart.find((item) => item.product.id === productId);
+export function setLineQuantity(cart: CartLine[], lineId: string, quantityMilli: number): CartResult {
+  const line = cart.find((item) => item.lineId === lineId);
   if (!line) return { cart };
-  if (quantityMilli <= 0) return { cart: removeFromCart(cart, productId) };
+  if (quantityMilli <= 0) return { cart: removeFromCart(cart, lineId) };
   const { product } = line;
   if (product.unit === "piece" && quantityMilli % 1000 !== 0) {
     return { cart, error: `${product.name} se vende en piezas enteras.` };
   }
   return {
     cart: cart.map((item) =>
-      item.product.id === productId ? { ...item, quantityMilli } : item
+      item.lineId === lineId ? { ...item, quantityMilli } : item
     ),
   };
 }
 
-export function setLineDiscount(cart: CartLine[], productId: number, percent: number): CartLine[] {
+export function setLineDiscount(cart: CartLine[], lineId: string, percent: number): CartLine[] {
   return cart.map((line) =>
-    line.product.id === productId ? { ...line, discountPercent: clampPercent(percent) } : line
+    line.lineId === lineId ? { ...line, discountPercent: clampPercent(percent) } : line
   );
 }
 
-export const removeFromCart = (cart: CartLine[], productId: number) =>
-  cart.filter((line) => line.product.id !== productId);
+export const removeFromCart = (cart: CartLine[], lineId: string) =>
+  cart.filter((line) => line.lineId !== lineId);
 
 /* ---------- Captura rápida ---------- */
 

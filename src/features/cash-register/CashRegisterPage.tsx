@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Banknote, Printer } from "lucide-react";
 import { closeCashSession, getOpenCashSession, listCashClosures, openCashSession, recordCashMovement, type CashClosure, type CashDenomination, type CashSession } from "./cash.api";
 import CashWithdrawalDialog from "./CashWithdrawalDialog";
+import ShiftMonitoring from "./ShiftMonitoring";
 
 const money = (cents: number) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 const DENOMINATIONS = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20, 10, 5];
@@ -79,7 +80,8 @@ export default function CashRegisterPage() {
   }
 
   return <main className="cash-page min-h-full space-y-5 bg-slate-50 p-4 text-slate-800 sm:p-6">
-    <header className="no-print"><p className="text-sm text-slate-500">Operación / Turnos</p><h1 className="mt-1 text-2xl font-semibold text-slate-900">Caja</h1><p className="mt-1 text-sm text-slate-500">Abre el turno, registra movimientos y realiza un arqueo detallado al cierre.</p></header>
+    <header className="no-print"><h1 className="text-2xl font-semibold text-slate-900">Cortes de caja</h1></header>
+    <ShiftMonitoring />
     {error && <div role="alert" className="no-print rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     {feedback && <div role="status" className="no-print rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{feedback}</div>}
     {loading ? <p className="no-print text-sm text-slate-500">Consultando caja…</p> : session ? <section className="no-print space-y-5 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">

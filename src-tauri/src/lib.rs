@@ -44,6 +44,7 @@ pub fn run() {
             commands::auth::logout,
             commands::auth::list_users,
             commands::auth::create_user,
+            commands::auth::update_user,
             commands::auth::set_user_active,
             commands::auth::set_user_role,
             commands::auth::reset_user_password,

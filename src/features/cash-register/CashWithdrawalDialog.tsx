@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { listActiveAdmins, type AdminOption } from "../auth/auth.api";
 import { getOpenCashSession, recordCashWithdrawal, type CashDenomination } from "./cash.api";
 
-const VALUES = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20, 10, 5];
+const VALUES = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50];
 const money = (cents: number) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 const label = (cents: number) => cents >= 100 ? money(cents) : `${(cents / 100).toFixed(2)}¢`;
 
@@ -45,8 +45,7 @@ export default function CashWithdrawalDialog({ onClose, onSaved }: { onClose: ()
       <form onSubmit={(event) => void submit(event)} className="min-h-0 overflow-auto p-5">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{VALUES.map((value) => <label key={value} className="rounded-lg border border-slate-200 p-2.5 text-sm"><span className="font-semibold">{label(value)}</span><span className="ml-1 text-xs text-slate-500">×</span><input aria-label={`Cantidad ${label(value)}`} type="number" min="0" max="1000000" step="1" inputMode="numeric" value={counts[value]} onChange={(event) => setCounts((current) => ({ ...current, [value]: event.target.value }))} className="mt-1 w-full rounded border border-slate-200 p-2" /></label>)}</div>
         <div className="mt-4 flex justify-between rounded-lg bg-amber-50 p-3"><span>Importe del retiro</span><strong>{money(total)}</strong></div>
-        <p className="mt-2 text-xs text-slate-500">Efectivo esperado disponible: {available === null ? "consultando…" : money(available)}</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium">Encargado que recibe<select required value={recipient} onChange={(event) => setRecipient(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5"><option value="">Selecciona encargado</option>{admins.map((admin) => <option key={admin.username} value={admin.username}>{admin.displayName}</option>)}</select></label><label className="text-sm font-medium">Motivo<input required maxLength={240} value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 p-2.5" placeholder="Ej. entrega de fondo a gerencia" /></label></div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium">Encargado que recibe<select required value={recipient} onChange={(event) => setRecipient(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5"><option value="">Selecciona encargado</option>{admins.map((admin) => <option key={admin.username} value={admin.username}>{admin.displayName}</option>)}</select></label>  <label className="text-sm font-medium">Motivo<input value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 p-2.5" /></label></div>
         {error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
         <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={saving} onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button><button type="submit" disabled={saving || admins.length === 0 || total <= 0} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-amber-950 disabled:opacity-50">{saving ? "Registrando…" : "Confirmar retiro"}</button></div>
       </form>

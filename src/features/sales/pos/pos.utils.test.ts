@@ -25,7 +25,8 @@ const product = (overrides: Partial<Product> = {}): Product => ({
   ...overrides,
 });
 
-const line = (p: Product, quantityMilli: number, discountPercent = 0): CartLine => ({
+const line = (p: Product, quantityMilli: number, discountPercent = 0, lineId = "test-1"): CartLine => ({
+  lineId,
   product: p,
   quantityMilli,
   discountPercent,
@@ -73,23 +74,17 @@ describe("addToCart", () => {
     expect(result.cart[0].quantityMilli).toBe(1000);
   });
 
-  it("suma la cantidad si el producto ya está en el carrito", () => {
+  it("agrega un nuevo renglón cada vez aunque sea el mismo producto", () => {
     const first = addToCart([], product(), 1000).cart;
     const second = addToCart(first, product(), 2000);
-    expect(second.cart).toHaveLength(1);
-    expect(second.cart[0].quantityMilli).toBe(3000);
+    expect(second.cart).toHaveLength(2);
+    expect(second.cart[0].quantityMilli).toBe(1000);
+    expect(second.cart[1].quantityMilli).toBe(2000);
+    expect(second.cart[0].lineId).not.toBe(second.cart[1].lineId);
   });
 
-  it("rechaza lo que excede el stock y deja el carrito intacto", () => {
-    const cart = addToCart([], product({ stockQuantity: 2 }), 2000).cart;
-    const result = addToCart(cart, product({ stockQuantity: 2 }), 1000);
-    expect(result.error).toMatch(/Stock insuficiente/);
-    expect(result.cart).toBe(cart);
-  });
-
-  it("rechaza productos inactivos, sin existencias, cantidades inválidas y piezas fraccionadas", () => {
-    expect(addToCart([], product({ active: false }), 1000).error).toMatch(/existencias/);
-    expect(addToCart([], product({ stockQuantity: 0 }), 1000).error).toMatch(/existencias/);
+  it("rechaza productos inactivos, cantidades inválidas y piezas fraccionadas", () => {
+    expect(addToCart([], product({ active: false }), 1000).error).toMatch(/está inactivo/);
     expect(addToCart([], product(), 0).error).toMatch(/mayor que cero/);
     expect(addToCart([], product(), -1000).error).toMatch(/mayor que cero/);
     expect(addToCart([], product(), 1500).error).toMatch(/piezas enteras/);
@@ -103,41 +98,35 @@ describe("addToCart", () => {
 });
 
 describe("setLineQuantity / setLineDiscount / removeFromCart", () => {
-  const cart = [line(product({ stockQuantity: 5 }), 2000)];
+  const cart = [line(product({ stockQuantity: 5 }), 2000, 0, "line-1")];
 
   it("quita la línea con cantidad cero o negativa", () => {
-    expect(setLineQuantity(cart, 1, 0).cart).toHaveLength(0);
-    expect(setLineQuantity(cart, 1, -1000).cart).toHaveLength(0);
-  });
-
-  it("limita al stock disponible y avisa", () => {
-    const result = setLineQuantity(cart, 1, 9000);
-    expect(result.cart[0].quantityMilli).toBe(5000);
-    expect(result.error).toMatch(/Stock insuficiente/);
+    expect(setLineQuantity(cart, "line-1", 0).cart).toHaveLength(0);
+    expect(setLineQuantity(cart, "line-1", -1000).cart).toHaveLength(0);
   });
 
   it("actualiza la cantidad cuando es válida", () => {
-    const result = setLineQuantity(cart, 1, 3000);
+    const result = setLineQuantity(cart, "line-1", 3000);
     expect(result.cart[0].quantityMilli).toBe(3000);
     expect(result.error).toBeUndefined();
   });
 
   it("no acepta fracciones en piezas", () => {
-    const result = setLineQuantity(cart, 1, 2500);
+    const result = setLineQuantity(cart, "line-1", 2500);
     expect(result.error).toMatch(/piezas enteras/);
     expect(result.cart[0].quantityMilli).toBe(2000);
   });
 
   it("mantiene el descuento dentro de 0–100 %", () => {
-    expect(setLineDiscount(cart, 1, 150)[0].discountPercent).toBe(100);
-    expect(setLineDiscount(cart, 1, -5)[0].discountPercent).toBe(0);
-    expect(setLineDiscount(cart, 1, Number.NaN)[0].discountPercent).toBe(0);
-    expect(setLineDiscount(cart, 1, 12.5)[0].discountPercent).toBe(12.5);
+    expect(setLineDiscount(cart, "line-1", 150)[0].discountPercent).toBe(100);
+    expect(setLineDiscount(cart, "line-1", -5)[0].discountPercent).toBe(0);
+    expect(setLineDiscount(cart, "line-1", Number.NaN)[0].discountPercent).toBe(0);
+    expect(setLineDiscount(cart, "line-1", 12.5)[0].discountPercent).toBe(12.5);
   });
 
-  it("quita una línea por producto", () => {
-    expect(removeFromCart(cart, 1)).toHaveLength(0);
-    expect(removeFromCart(cart, 99)).toHaveLength(1);
+  it("quita una línea por su lineId", () => {
+    expect(removeFromCart(cart, "line-1")).toHaveLength(0);
+    expect(removeFromCart(cart, "otra-linea")).toHaveLength(1);
   });
 });
 

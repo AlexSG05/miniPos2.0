@@ -16,6 +16,7 @@ pub struct CashSession {
     pub opened_at: String,
     pub opened_by_name: String,
     pub opening_cents: i64,
+    pub opening_note: Option<String>,
     pub expected_cents: i64,
     pub cash_sales_cents: i64,
     pub cash_refunds_cents: i64,
@@ -202,8 +203,9 @@ pub async fn get_open_cash_session(
     session_token: String,
 ) -> Result<Option<CashSession>, String> {
     require_role(&auth, &session_token, &["admin", "cashier"])?;
-    let row = sqlx::query_as::<_, (i64, String, i64, String)>(
+    let row = sqlx::query_as::<_, (i64, String, i64, Option<String>, String)>(
         "SELECT c.id, c.opened_at, c.opening_cents,
+                c.opening_note,
                 COALESCE(u.display_name, 'Usuario anterior')
          FROM cash_sessions c LEFT JOIN users u ON u.id = c.opened_by_user_id
          WHERE c.closed_at IS NULL",
@@ -211,7 +213,7 @@ pub async fn get_open_cash_session(
     .fetch_optional(&db.0)
     .await
     .map_err(|_| "No fue posible consultar el estado de caja.".to_string())?;
-    let Some((id, opened_at, opening_cents, opened_by_name)) = row else {
+    let Some((id, opened_at, opening_cents, opening_note, opened_by_name)) = row else {
         return Ok(None);
     };
     let cash_sales_cents: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(p.amount_cents), 0) FROM sale_payments p JOIN sales s ON s.id = p.sale_id WHERE s.session_id = ? AND p.method = 'cash'").bind(id).fetch_one(&db.0).await.map_err(|_| "No fue posible calcular ventas en efectivo.".to_string())?;
@@ -224,6 +226,7 @@ pub async fn get_open_cash_session(
         opened_at,
         opened_by_name,
         opening_cents,
+        opening_note,
         expected_cents: expected_cents(&db.0, id, opening_cents).await?,
         cash_sales_cents,
         cash_refunds_cents,
@@ -239,14 +242,21 @@ pub async fn open_cash_session(
     auth: State<'_, AuthState>,
     session_token: String,
     opening_cents: i64,
+    opening_note: Option<String>,
 ) -> Result<CashSession, String> {
     let user = require_role(&auth, &session_token, &["admin", "cashier"])?;
     if opening_cents < 0 {
         return Err("El fondo inicial no puede ser negativo.".into());
     }
-    let result = sqlx::query("INSERT INTO cash_sessions (opening_cents, opened_by_user_id) VALUES (?, ?)")
+    let opening_note = opening_note.unwrap_or_default().trim().to_string();
+    if opening_note.chars().count() > 240 {
+        return Err("La nota de apertura admite hasta 240 caracteres.".into());
+    }
+    let opening_note = if opening_note.is_empty() { None } else { Some(opening_note) };
+    let result = sqlx::query("INSERT INTO cash_sessions (opening_cents, opened_by_user_id, opening_note) VALUES (?, ?, ?)")
         .bind(opening_cents)
         .bind(user.id)
+        .bind(&opening_note)
         .execute(&db.0)
         .await
         .map_err(|error| {
@@ -268,6 +278,7 @@ pub async fn open_cash_session(
         opened_at,
         opened_by_name: user.display_name,
         opening_cents,
+        opening_note,
         expected_cents: opening_cents,
         cash_sales_cents: 0,
         cash_refunds_cents: 0,

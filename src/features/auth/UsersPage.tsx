@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { KeyRound, Plus, Search, ShieldCheck, UserRound, Users, X } from "lucide-react";
-import { createUser, listUsers, resetUserPassword, setUserActive, setUserRole, type UserInfo, type UserRole } from "./auth.api";
+import { KeyRound, Pencil, Plus, Search, ShieldCheck, UserRound, Users, X } from "lucide-react";
+import { createUser, listUsers, resetUserPassword, setUserActive, setUserRole, updateUser, type UserInfo, type UserRole } from "./auth.api";
 import { useAuth } from "./useAuth";
 
 type UserStatus = "all" | "active" | "inactive";
@@ -15,6 +15,11 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<UserRole | "all">("all");
   const [statusFilter, setStatusFilter] = useState<UserStatus>("active");
   const [showCreate, setShowCreate] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserInfo | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editRole, setEditRole] = useState<UserRole>("cashier");
+  const [editPhone, setEditPhone] = useState("");
+  const [editHireDate, setEditHireDate] = useState(localToday);
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -73,6 +78,22 @@ export default function UsersPage() {
     catch (cause) { setError(String(cause)); }
   }
 
+  function beginEdit(target: UserInfo) {
+    setError(""); setNotice(""); setEditingUser(target);
+    setEditDisplayName(target.displayName); setEditRole(target.role);
+    setEditPhone(target.phone); setEditHireDate(target.hireDate);
+  }
+
+  async function submitEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!editingUser) return;
+    setSaving(true); setError(""); setNotice("");
+    try {
+      await updateUser(editingUser.id, editDisplayName.trim(), editRole, editPhone.trim(), editHireDate);
+      await refresh(); setEditingUser(null); setNotice(`Datos de ${editingUser.username} actualizados.`);
+    } catch (cause) { setError(String(cause)); }
+    finally { setSaving(false); }
+  }
+
   return (
     <main className="flex h-full min-h-0 flex-col gap-4 overflow-hidden bg-slate-50 text-slate-800">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
@@ -101,7 +122,7 @@ export default function UsersPage() {
               <td className="px-4 py-3 font-semibold text-slate-800">{account.username}{account.id === currentUser?.id && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Tú</span>}</td><td className="px-4 py-3">{account.displayName}</td><td className="px-4 py-3 text-slate-600">{account.phone || "—"}</td>
               <td className="px-4 py-3"><select aria-label={`Rol de ${account.username}`} value={account.role} disabled={!account.active || account.id === currentUser?.id} onChange={(event) => void changeRole(account, event.target.value as UserRole)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 disabled:opacity-50">{Object.entries(roleName).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
               <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${account.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{account.active ? "Activo" : "Desactivado"}</span></td><td className="px-4 py-3 text-slate-500">{new Date(`${account.hireDate}T12:00:00`).toLocaleDateString("es-MX")}</td>
-              <td className="px-4 py-3"><div className="flex gap-2"><button type="button" onClick={() => void changePassword(account)} disabled={!account.active} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40"><KeyRound size={13} /> Contraseña</button><button type="button" onClick={() => void toggleActive(account)} disabled={account.id === currentUser?.id} className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:text-rose-600 disabled:opacity-40">{account.active ? "Desactivar" : "Reactivar"}</button></div></td>
+              <td className="px-4 py-3"><div className="flex gap-2"><button type="button" onClick={() => beginEdit(account)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700"><Pencil size={13} /> Editar</button><button type="button" onClick={() => void changePassword(account)} disabled={!account.active} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40"><KeyRound size={13} /> Contraseña</button><button type="button" onClick={() => void toggleActive(account)} disabled={account.id === currentUser?.id} className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:text-rose-600 disabled:opacity-40">{account.active ? "Desactivar" : "Reactivar"}</button></div></td>
             </tr>)}</tbody></table>
         </div>
         <footer className="flex shrink-0 items-center justify-between border-t border-slate-200 px-4 py-2 text-xs text-slate-500"><span>{visibleUsers.length} usuarios</span><span>Las cuentas desactivadas no pueden iniciar sesión.</span></footer>
@@ -109,6 +130,9 @@ export default function UsersPage() {
 
       {showCreate && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setShowCreate(false); }}><section role="dialog" aria-modal="true" aria-labelledby="new-user-title" className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Accesos</p><h2 id="new-user-title" className="mt-1 text-xl font-bold text-slate-900">Nuevo usuario</h2><p className="mt-1 text-sm text-slate-500">Crea una cuenta y define su nivel de acceso.</p></div><button type="button" onClick={() => setShowCreate(false)} aria-label="Cerrar" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={19} /></button></div>
         <form onSubmit={(event) => void submit(event)} className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">Nombre visible<input autoFocus className={`${inputClass} mt-1`} maxLength={120} value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700">Usuario<input className={`${inputClass} mt-1`} minLength={3} maxLength={40} autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700">Contraseña<input className={`${inputClass} mt-1`} type="password" minLength={4} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /><span className="mt-1 block text-xs font-normal text-slate-500">Debe tener mínimo 4 caracteres.</span></label><label className="text-sm font-medium text-slate-700">Teléfono <span className="font-normal text-slate-400">(opcional)</span><input className={`${inputClass} mt-1`} type="tel" maxLength={30} autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Ej. 55 1234 5678" /></label><label className="text-sm font-medium text-slate-700">Fecha de ingreso<input className={`${inputClass} mt-1`} type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700">Rol<select className={`${inputClass} mt-1`} value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="cashier">Cajero</option><option value="inventory">Inventario</option><option value="admin">Administrador</option></select></label><div className="mt-1 flex justify-end gap-2 sm:col-span-2"><button type="button" onClick={() => setShowCreate(false)} disabled={saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button><button disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Guardando…" : "Crear usuario"}</button></div></form>
+      </section></div>}
+      {editingUser && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setEditingUser(null); }}><section role="dialog" aria-modal="true" aria-labelledby="edit-user-title" className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Accesos · {editingUser.username}</p><h2 id="edit-user-title" className="mt-1 text-xl font-bold text-slate-900">Editar usuario</h2><p className="mt-1 text-sm text-slate-500">Actualiza su información y permisos.</p></div><button type="button" onClick={() => setEditingUser(null)} disabled={saving} aria-label="Cerrar" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={19} /></button></div>
+        <form onSubmit={(event) => void submitEdit(event)} className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">Nombre visible<input autoFocus className={`${inputClass} mt-1`} maxLength={120} value={editDisplayName} onChange={(event) => setEditDisplayName(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700">Usuario<input className={`${inputClass} mt-1 bg-slate-50 text-slate-500`} value={editingUser.username} disabled /><span className="mt-1 block text-xs font-normal text-slate-500">El nombre de usuario no se puede cambiar.</span></label><label className="text-sm font-medium text-slate-700">Teléfono<input className={`${inputClass} mt-1`} type="tel" maxLength={30} value={editPhone} onChange={(event) => setEditPhone(event.target.value)} placeholder="Ej. 55 1234 5678" /></label><label className="text-sm font-medium text-slate-700">Fecha de ingreso<input className={`${inputClass} mt-1`} type="date" value={editHireDate} onChange={(event) => setEditHireDate(event.target.value)} required /></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">Rol<select className={`${inputClass} mt-1`} value={editRole} disabled={editingUser.id === currentUser?.id} onChange={(event) => setEditRole(event.target.value as UserRole)}>{Object.entries(roleName).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{editingUser.id === currentUser?.id && <span className="mt-1 block text-xs font-normal text-slate-500">No puedes cambiar tu propio rol.</span>}</label><div className="mt-1 flex justify-end gap-2 sm:col-span-2"><button type="button" onClick={() => setEditingUser(null)} disabled={saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button><button disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Guardando…" : "Guardar cambios"}</button></div></form>
       </section></div>}
     </main>
   );

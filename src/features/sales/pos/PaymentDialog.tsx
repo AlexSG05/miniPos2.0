@@ -62,16 +62,22 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
     return () => { active = false; };
   }, []);
 
-  // F12 confirma, F8 efectivo, F9 tarjeta (sin salir del teclado).
+  // F12 / Ctrl+Enter confirma; F8/Alt+E efectivo, F9/Alt+T tarjeta, Alt+F fiado (sin salir del teclado).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "F12") {
+      if (event.key === "F12" || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
         event.preventDefault();
         formRef.current?.requestSubmit();
-      } else if (event.key === "F8" || event.key === "F9") {
+      } else if (event.key === "F8" || (event.altKey && (event.key === "e" || event.key === "E"))) {
         event.preventDefault();
-        setMethod(event.key === "F8" ? "cash" : "card");
-        if (event.key === "F8") window.requestAnimationFrame(() => receivedRef.current?.focus());
+        setMethod("cash");
+        window.requestAnimationFrame(() => receivedRef.current?.focus());
+      } else if (event.key === "F9" || (event.altKey && (event.key === "t" || event.key === "T"))) {
+        event.preventDefault();
+        setMethod("card");
+      } else if (event.altKey && (event.key === "f" || event.key === "F")) {
+        event.preventDefault();
+        setMethod("credit");
       }
     }
     window.addEventListener("keydown", onKeyDown, true);
@@ -83,18 +89,23 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
     if (next === "cash") window.requestAnimationFrame(() => receivedRef.current?.focus());
   }
 
-  const methodButton = (value: PaymentMethod, label: string, hotkey: string, Icon: typeof Banknote) => (
+  const methodButton = (value: PaymentMethod, label: string, hotkey: string, altKey: string, Icon: typeof Banknote) => (
     <button
       type="button"
       aria-pressed={method === value}
       onClick={() => chooseMethod(value)}
-      className={`flex h-14 items-center justify-center gap-2 rounded-xl border-2 text-sm font-bold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
+      className={`flex h-14 items-center justify-center gap-1.5 rounded-xl border-2 text-sm font-bold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
         method === value
           ? "border-blue-600 bg-blue-50 text-blue-700"
           : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
       }`}
     >
-      <Icon size={19} /> {label} <kbd className={kbd}>{hotkey}</kbd>
+      <Icon size={18} />
+      <span>{label}</span>
+      <div className="flex items-center gap-0.5">
+        <kbd className={kbd}>{hotkey}</kbd>
+        <span className="text-[9px] font-normal opacity-60">/{altKey}</span>
+      </div>
     </button>
   );
 
@@ -117,9 +128,9 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          {methodButton("cash", "Efectivo", "F8", Banknote)}
-          {methodButton("card", "Tarjeta", "F9", CreditCard)}
-          {methodButton("credit", "Fiado", "", UserRound)}
+          {methodButton("cash", "Efectivo", "F8", "Alt+E", Banknote)}
+          {methodButton("card", "Tarjeta", "F9", "Alt+T", CreditCard)}
+          {methodButton("credit", "Fiado", "F10", "Alt+F", UserRound)}
         </div>
 
         {method === "credit" ? (
@@ -153,6 +164,12 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
                 value={received}
                 onChange={(event) => setReceived(event.target.value.replace(/[^\d.,]/g, ""))}
                 onFocus={(event) => event.currentTarget.select()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && canConfirm) {
+                    event.preventDefault();
+                    formRef.current?.requestSubmit();
+                  }
+                }}
                 className="h-16 w-full rounded-xl border-2 border-slate-200 bg-white pl-10 pr-4 text-right text-3xl font-bold tabular-nums text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
               />
             </div>
@@ -212,7 +229,13 @@ export default function PaymentDialog({ totalCents, saving, error, onConfirm, on
             disabled={!canConfirm}
             className="flex h-14 flex-[1.6] items-center justify-center gap-2 rounded-xl bg-blue-600 text-base font-extrabold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {saving ? "Registrando…" : <>CONFIRMAR COBRO <kbd className={kbd}>F12</kbd></>}
+            {saving ? "Registrando…" : (
+              <>
+                <span>CONFIRMAR COBRO</span>
+                <kbd className={kbd}>F12</kbd>
+                <kbd className="rounded border border-white/40 bg-white/15 px-1 py-0.5 text-[9px] font-bold">↵ Enter</kbd>
+              </>
+            )}
             {!saving && <CheckCircle2 size={19} />}
           </button>
         </div>

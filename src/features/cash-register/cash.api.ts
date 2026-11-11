@@ -5,6 +5,7 @@ export type CashSession = {
   openedAt: string;
   openedByName: string;
   openingCents: number;
+  openingNote: string | null;
   expectedCents: number;
   cashSalesCents: number;
   cashRefundsCents: number;
@@ -43,8 +44,8 @@ export function listCashClosures() {
   return invokeAuthed<CashClosure[]>("list_cash_closures");
 }
 
-export function openCashSession(openingCents: number) {
-  return invokeAuthed<CashSession>("open_cash_session", { openingCents });
+export function openCashSession(openingCents: number, openingNote = "") {
+  return invokeAuthed<CashSession>("open_cash_session", { openingCents, openingNote });
 }
 
 export function closeCashSession(closure: { denominations: CashDenomination[]; differenceReason: string }) {

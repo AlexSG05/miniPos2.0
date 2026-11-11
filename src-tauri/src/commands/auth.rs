@@ -256,6 +256,33 @@ pub async fn create_user(db: State<'_, Database>, auth: State<'_, AuthState>, se
 }
 
 #[tauri::command]
+pub async fn update_user(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, user_id: i64, display_name: String, role: String, phone: String, hire_date: String) -> Result<UserInfo, String> {
+    let current = require_role(&auth, &session_token, &["admin"])?;
+    if user_id <= 0 { return Err("El usuario indicado no es válido.".into()); }
+    if display_name.trim().is_empty() || display_name.trim().chars().count() > 120 { return Err("El nombre debe tener entre 1 y 120 caracteres.".into()); }
+    validate_employee_details(&phone, &hire_date)?;
+    if !matches!(role.as_str(), "admin" | "cashier" | "inventory") { return Err("El rol indicado no es válido.".into()); }
+    let previous: Option<(String, bool)> = sqlx::query_as("SELECT role, active FROM users WHERE id = ?")
+        .bind(user_id).fetch_optional(&db.0).await.map_err(|_| "No fue posible validar el usuario.".to_string())?;
+    let Some((previous_role, active)) = previous else { return Err("No se encontró el usuario.".into()); };
+    if current.id == user_id && previous_role != role { return Err("No puedes cambiar tu propio rol.".into()); }
+    if active && previous_role == "admin" && role != "admin" {
+        let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1")
+            .fetch_one(&db.0).await.map_err(|_| "No fue posible validar los administradores.".to_string())?;
+        if admins <= 1 { return Err("Debe permanecer al menos un administrador activo.".into()); }
+    }
+    sqlx::query("UPDATE users SET display_name = ?, role = ?, phone = ?, hire_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?")
+        .bind(display_name.trim()).bind(&role).bind(phone.trim()).bind(&hire_date).bind(user_id)
+        .execute(&db.0).await.map_err(|_| "No fue posible actualizar el usuario.".to_string())?;
+    let updated = user_by_id(&db.0, user_id).await?;
+    let mut sessions = auth.0.lock().map_err(|_| "No fue posible actualizar las sesiones.".to_string())?;
+    for session in sessions.values_mut().filter(|session| session.user.id == user_id) {
+        session.user = updated.clone();
+    }
+    Ok(updated)
+}
+
+#[tauri::command]
 pub async fn set_user_active(db: State<'_, Database>, auth: State<'_, AuthState>, session_token: String, user_id: i64, active: bool) -> Result<(), String> {
     let current = require_role(&auth, &session_token, &["admin"])?;
     if user_id <= 0 { return Err("El usuario indicado no es válido.".into()); }

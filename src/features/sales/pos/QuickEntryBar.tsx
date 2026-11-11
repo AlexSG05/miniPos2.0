@@ -55,7 +55,7 @@ export default function QuickEntryBar({
     <div className="shrink-0 border-t border-slate-200 bg-slate-50 p-3 sm:p-4">
       <div className="flex items-end gap-3">
         <div className="w-24 shrink-0 sm:w-28">
-          <label htmlFor="pos-quantity" className={label}>Cantidad <kbd className={kbd}>F2</kbd></label>
+          <label htmlFor="pos-quantity" className={label}>Cantidad <kbd className={kbd}>F3</kbd></label>
           <input
             id="pos-quantity"
             ref={quantityRef}
@@ -144,13 +144,17 @@ export default function QuickEntryBar({
           type="button"
           onClick={onCharge}
           disabled={!hasItems}
-          className="flex h-14 shrink-0 items-center gap-3 rounded-xl bg-blue-600 px-5 text-lg font-extrabold tracking-wide text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-300 sm:px-7"
+          title="Cobrar la cuenta (F12 o Ctrl+Enter)"
+          className="flex h-14 shrink-0 items-center gap-2.5 rounded-xl bg-blue-600 px-4 text-base font-extrabold tracking-wide text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-300 sm:px-6"
         >
-          COBRAR
-          <kbd className="rounded-md border border-white/40 bg-white/15 px-2 py-1 text-xs font-bold leading-none">F12</kbd>
+          <span>COBRAR</span>
+          <div className="flex flex-col items-center leading-none gap-0.5">
+            <kbd className="rounded border border-white/40 bg-white/20 px-1.5 py-0.5 text-[10px] font-bold">F12</kbd>
+            <span className="text-[9px] font-semibold opacity-90">Ctrl+↵</span>
+          </div>
           <span
             aria-label={`${count} artículos`}
-            className={`min-w-8 rounded-full px-2 py-1 text-center text-sm font-bold tabular-nums ${hasItems ? "bg-white text-blue-700" : "bg-white/60 text-slate-500"}`}
+            className={`min-w-7 rounded-full px-2 py-0.5 text-center text-xs font-bold tabular-nums ${hasItems ? "bg-white text-blue-700" : "bg-white/60 text-slate-500"}`}
           >
             {count}
           </span>
